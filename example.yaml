@@ -1,0 +1,21 @@
+substitutions:
+  mac_address: F2:30:EC:1E:B7:E3
+  mqtt_broker: 10.10.10.3
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+mqtt:
+  broker: ${mqtt_broker}
+
+esp32_ble_tracker:
+
+ble_client:
+  - mac_address: ${mac_address}
+    id: drazice_okhe
+
+smartboiler:
+  ble_client_id: drazice_okhe
+  topic_prefix: smartboiler
