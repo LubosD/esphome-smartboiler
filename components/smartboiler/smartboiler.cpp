@@ -1,4 +1,5 @@
 #include "smartboiler.h"
+#include "esphome/core/application.h"
 
 static const char *const TAG = "smartboiler";
 
@@ -43,6 +44,10 @@ static const char* modeStrings[] = {
 	"STOP", "NORMAL", "HDO", "SMART", "SMARTHDO", "ANTIFROST", "NIGHT", "TEST"
 };
 
+SmartBoiler::SmartBoiler()
+{
+}
+
 void SmartBoiler::setup()
 {
 	subscribe(root_topic_ + "set_temperature", &SmartBoiler::on_set_temperature);
@@ -57,6 +62,17 @@ void SmartBoiler::setup()
 	};
 
 	esphome::mqtt::global_mqtt_client->set_last_will(std::move(lastWill));
+}
+
+void SmartBoiler::dump_config()
+{
+	ESP_LOGCONFIG(TAG, "SmartBoiler:");
+
+	LOG_SENSOR("  ", "Device", temperature_sensor_1_sensor_);
+	LOG_SENSOR("  ", "Device", temperature_sensor_2_sensor_);
+	LOG_BINARY_SENSOR("  ", "Device", hdo_low_tariff_sensor_);
+	LOG_SELECT("  ", "Mode", mode_select_);
+	LOG_CLIMATE("  ", "Thermostat", thermostat_);
 }
 
 void SmartBoiler::send_to_boiler(uint8_t* frame, size_t length)
@@ -79,6 +95,21 @@ void SmartBoiler::on_set_temperature(const std::string &payload)
 
 	int temp = *tempOpt;
 
+	if (temp < 5 || temp > 74)
+	{
+		ESP_LOGW(TAG, "Invalid set temperature: %d", temp);
+		return;
+	}
+
+	uint8_t frame[] = {
+		SbcPacket::SetNormalTemperature, 0x00, 0x00, 0x00, uint8_t(temp & 0xff), 0x00, 0x00, 0x00
+	};
+
+	send_to_boiler(frame, sizeof(frame));
+}
+
+void SmartBoiler::on_set_temperature_int(int temp)
+{
 	if (temp < 5 || temp > 74)
 	{
 		ESP_LOGW(TAG, "Invalid set temperature: %d", temp);
@@ -204,20 +235,33 @@ void SmartBoiler::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
 
 			send_to_boiler(frame, sizeof(frame));
 
+			delay(50);
 			request_value(SbcPacket::HdoEnabled);
+			delay(50);
 			request_value(SbcPacket::LastHdoTime);
+			delay(50);
 			request_value(SbcPacket::HdoInfo);
+			delay(50);
 			request_value(SbcPacket::HdoLowTariff);
+			delay(50);
 
 			// Using GetAllBasicInfo seems to cause strange issues (overload?), so let's ask separately
 			request_value(SbcPacket::Model);
+			delay(50);
 			request_value(SbcPacket::FwVersion);
+			delay(50);
 			request_value(SbcPacket::Mode);
+			delay(50);
 			request_value(SbcPacket::HeatOn);
+			delay(50);
 			request_value(SbcPacket::Sensor1);
+			delay(50);
 			request_value(SbcPacket::Sensor2);
+			delay(50);
 			request_value(SbcPacket::Temperature);
+			delay(50);
 			request_value(SbcPacket::Capacity);
+			delay(50);
 			request_value(SbcPacket::Name);
 
 			break;
@@ -303,7 +347,14 @@ void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
 			int mode = *modeOpt;
 
 			if (mode >= 0 && mode < sizeof(modeStrings) / sizeof(modeStrings[0]))
+			{
 				publish(root_topic_ + "mode", modeStrings[mode], 0, true);
+
+				is_stopped_ = mode == 0;
+
+				if (mode_select_)
+					mode_select_->publish_state(modeStrings[mode]);
+			}
 			else
 				ESP_LOGW(TAG, "Bad mode value from boiler: %d", mode);
 
@@ -317,6 +368,12 @@ void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
 			{
 				ESP_LOGW(TAG, "Bad set temp value from boiler: %s", arg.c_str());
 				break;
+			}
+
+			if (tempOpt)
+			{
+				if (thermostat_)
+					thermostat_->publish_target_temp(*tempOpt);
 			}
 
 			publish(root_topic_ + "temperature", to_string(*tempOpt), 0, true);
@@ -365,12 +422,27 @@ void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
 		case SbcPacket::Sensor1:
 		{
 			publish(root_topic_ + "sensor1", arg, 0, true);
+			if (temperature_sensor_1_sensor_)
+			{
+				auto sensor1 = parse_number<float>(arg);
+				if (sensor1)
+					temperature_sensor_1_sensor_->publish_state(*sensor1);
+			}
 			break;
 		}
 
 		case SbcPacket::Sensor2:
 		{
 			publish(root_topic_ + "sensor2", arg, 0, true);
+
+			auto sensor2 = parse_number<float>(arg);
+			if (sensor2)
+			{
+				if (temperature_sensor_2_sensor_)
+					temperature_sensor_2_sensor_->publish_state(*sensor2);
+				if (thermostat_)
+					thermostat_->publish_current_temp(*sensor2);
+			}
 			break;
 		}
 
@@ -395,6 +467,12 @@ void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
 				break;
 			}
 
+			if (hdo_low_tariff_sensor_)
+			{
+				bool hdo_low_tariff = !!*onoffOpt;
+				hdo_low_tariff_sensor_->publish_state(hdo_low_tariff);
+			}
+
 			publish(root_topic_ + "hdo_low_tariff", *onoffOpt ? "1" : "0", 0, true);
 			break;
 		}
@@ -408,6 +486,12 @@ void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
 				break;
 			}
 
+			bool heat_on = !!*onoffOpt;
+			if (heat_on_sensor_)
+				heat_on_sensor_->publish_state(heat_on);
+			if (thermostat_)
+				thermostat_->publish_action(is_stopped_, heat_on);
+
 			publish(root_topic_ + "heat_on", *onoffOpt ? "1" : "0", 0, true);
 			break;
 		}
@@ -418,6 +502,80 @@ void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
 			break;
 		}
 	}
+}
+
+void SmartBoiler::set_mode(SmartBoilerModeSelect *s)
+{
+	mode_select_ = s;
+	s->set_parent(this);
+}
+
+void SmartBoiler::set_thermostat(SmartBoilerThermostat *t)
+{
+	thermostat_ = t;
+	t->set_parent(this);
+}
+
+void SmartBoilerModeSelect::control(const std::string &value)
+{
+	if (value.find("HDO") != std::string::npos)
+		get_parent()->on_set_hdo_enabled("1");
+	else
+		get_parent()->on_set_hdo_enabled("0");
+
+	get_parent()->on_set_mode(value);
+}
+
+SmartBoilerThermostat::SmartBoilerThermostat()
+{
+	this->mode = esphome::climate::CLIMATE_MODE_HEAT;
+}
+
+void SmartBoilerThermostat::control(const esphome::climate::ClimateCall &call)
+{
+	auto tt = call.get_target_temperature();
+	if (tt)
+	{
+		int temp = *tt;
+		get_parent()->on_set_temperature_int(temp);
+	}
+}
+
+esphome::climate::ClimateTraits SmartBoilerThermostat::traits()
+{
+	esphome::climate::ClimateTraits rv;
+
+	rv.set_visual_min_temperature(0);
+	rv.set_visual_max_temperature(74);
+	rv.set_visual_temperature_step(1);
+	rv.set_supports_current_temperature(true);
+	rv.set_supports_action(true);
+	rv.set_supported_modes({ climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT });
+
+	return rv;
+}
+
+void SmartBoilerThermostat::publish_target_temp(float temp)
+{
+	this->target_temperature = temp;
+	publish_state();
+}
+
+void SmartBoilerThermostat::publish_current_temp(float temp)
+{
+	this->current_temperature = temp;
+	publish_state();
+}
+
+void SmartBoilerThermostat::publish_action(bool stopped, bool heating)
+{
+	if (stopped)
+		this->action = esphome::climate::CLIMATE_ACTION_OFF;
+	else if (heating)
+		this->action = esphome::climate::CLIMATE_ACTION_HEATING;
+	else
+		this->action = esphome::climate::CLIMATE_ACTION_IDLE;
+	publish_state();
 }
 
 }

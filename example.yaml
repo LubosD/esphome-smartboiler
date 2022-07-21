@@ -10,6 +10,14 @@ external_components:
 mqtt:
   broker: ${mqtt_broker}
 
+sensor:
+
+binary_sensor:
+
+select:
+
+climate:
+
 esp32_ble_tracker:
 
 ble_client:
@@ -19,3 +27,15 @@ ble_client:
 smartboiler:
   ble_client_id: drazice_okhe
   topic_prefix: smartboiler
+  temp1:
+    name: temp1
+  temp2:
+    name: temp2
+  hdo_low_tariff:
+    name: hdo_low_tariff
+  heat_on:
+    name: heat_on
+  mode:
+    name: mode
+  thermostat:
+    name: thermostat
