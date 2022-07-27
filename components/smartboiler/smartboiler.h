@@ -16,11 +16,12 @@ namespace sb {
 class SmartBoilerModeSelect;
 class SmartBoilerThermostat;
 
-class SmartBoiler : public Component, public esphome::ble_client::BLEClientNode, public esphome::mqtt::CustomMQTTDevice
+class SmartBoiler : public PollingComponent, public esphome::ble_client::BLEClientNode, public esphome::mqtt::CustomMQTTDevice
 {
 public:
 	SmartBoiler();
 	void setup() override;
+	void update() override;
 	void dump_config() override;
 	float get_setup_priority() const override { return setup_priority::DATA; }
 	void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
@@ -33,6 +34,7 @@ public:
 	void set_heat_on(binary_sensor::BinarySensor *s) { heat_on_sensor_ = s; }
 	void set_mode(SmartBoilerModeSelect *s);
 	void set_thermostat(SmartBoilerThermostat *t);
+	void set_consumption(sensor::Sensor *s) { consumption_sensor_ = s; }
 protected:
 	void on_set_temperature(const std::string &payload);
 	void on_set_temperature_int(int temp);
@@ -40,7 +42,7 @@ protected:
 	void on_set_mode(const std::string &payload);
 	void on_set_hdo_enabled(const std::string &payload);
 	void handle_incoming(const uint8_t *data, uint16_t length);
-	void request_value(uint8_t value);
+	void request_value(uint8_t value, uint8_t uid = 0);
 	void send_to_boiler(uint8_t* frame, size_t length);
 private:
 	bool online_ = false;
@@ -51,6 +53,7 @@ private:
 
 	sensor::Sensor *temperature_sensor_1_sensor_ = nullptr;
 	sensor::Sensor *temperature_sensor_2_sensor_ = nullptr;
+	sensor::Sensor *consumption_sensor_ = nullptr;
 
 	binary_sensor::BinarySensor* hdo_low_tariff_sensor_ = nullptr;
 	binary_sensor::BinarySensor* heat_on_sensor_ = nullptr;

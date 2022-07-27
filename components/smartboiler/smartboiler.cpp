@@ -29,6 +29,7 @@ namespace SbcPacket {
 		LastHdoTime = 0x20,
 		HdoLowTariff = 0x21,
 		HdoInfo = 0x22,
+		UidResponse = 0x33,
 		Capacity = 0x3a,
 		Name = 0x50,
 
@@ -36,9 +37,16 @@ namespace SbcPacket {
 		SetMode = 0x12,
 		SetHdoEnabled = 0x1B,
 
+		// Individual requests, replies come back as UidResponse
+		ConsumptionStatsGetAll = 0x5d,
+
 		RequestError = 0x34,
 	};
 }
+
+// This is our ID, it's not related to the protocol.
+// Ideally, we would use a counter and use that counter to match replies to requests.
+static const uint8_t UID_CONSUMPTION = 0xcc;
 
 static const char* modeStrings[] = {
 	"STOP", "NORMAL", "HDO", "SMART", "SMARTHDO", "ANTIFROST", "NIGHT", "TEST"
@@ -70,6 +78,7 @@ void SmartBoiler::dump_config()
 
 	LOG_SENSOR("  ", "Device", temperature_sensor_1_sensor_);
 	LOG_SENSOR("  ", "Device", temperature_sensor_2_sensor_);
+	LOG_SENSOR("  ", "Consumption", consumption_sensor_);
 	LOG_BINARY_SENSOR("  ", "Device", hdo_low_tariff_sensor_);
 	LOG_SELECT("  ", "Mode", mode_select_);
 	LOG_CLIMATE("  ", "Thermostat", thermostat_);
@@ -278,10 +287,19 @@ void SmartBoiler::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
 	}
 }
 
-void SmartBoiler::request_value(uint8_t value)
+void SmartBoiler::update()
+{
+	if (!online_)
+		return;
+
+	ESP_LOGD(TAG, "Requesting consumption");
+	request_value(SbcPacket::ConsumptionStatsGetAll, UID_CONSUMPTION);
+}
+
+void SmartBoiler::request_value(uint8_t value, uint8_t uid)
 {
 	uint8_t frame[] = {
-		value, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+		value, 0x00, uid, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
 
 	send_to_boiler(frame, sizeof(frame));
@@ -307,7 +325,7 @@ void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
 		publish(root_topic_ + "boiler_online", "1", 0, true);
 	}
 
-	ESP_LOGI(TAG, "Received data from boiler: cmd=0x%x, %s", cmd, arg.c_str());
+	ESP_LOGI(TAG, "Received data from boiler: cmd=0x%x, %s, %d bytes", cmd, arg.c_str(), length - 2);
 
 	switch (cmd)
 	{
@@ -370,14 +388,36 @@ void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
 				break;
 			}
 
-			if (tempOpt)
-			{
-				if (thermostat_)
-					thermostat_->publish_target_temp(*tempOpt);
-			}
+			if (thermostat_)
+				thermostat_->publish_target_temp(*tempOpt);
 
 			publish(root_topic_ + "temperature", to_string(*tempOpt), 0, true);
 			break;
+		}
+
+		case SbcPacket::UidResponse: {
+			switch (data[2])
+			{
+				case UID_CONSUMPTION:
+				{
+					uint32_t consumption;
+
+					consumption = data[4];
+					consumption |= uint32_t(data[5]) << 8;
+					consumption |= uint32_t(data[6]) << 16;
+					consumption |= uint32_t(data[7]) << 24;
+
+					ESP_LOGD(TAG, "Consumption: %d Wh", consumption);
+
+					if (consumption_sensor_)
+						consumption_sensor_->publish_state(consumption);
+					break;
+				}
+				default:
+				{
+					ESP_LOGW(TAG, "Unknown response UID: 0x%x", data[0]);
+				}
+			}
 		}
 
 		case SbcPacket::Time:

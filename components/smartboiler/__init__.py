@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import ble_client, sensor, select, binary_sensor, climate
-from esphome.const import CONF_ID,UNIT_CELSIUS, ICON_THERMOMETER
+from esphome.const import CONF_ID,UNIT_CELSIUS, ICON_THERMOMETER, ICON_FLASH
 
 DEPENDENCIES = ['esp32', 'ble_client', 'mqtt', 'sensor', 'binary_sensor', 'select', 'climate']
 
@@ -16,16 +16,17 @@ CONF_MODE = 'mode'
 CONF_HDO_LOW_TARIFF = 'hdo_low_tariff'
 CONF_HEAT_ON = 'heat_on'
 CONF_THERMOSTAT = 'thermostat'
+CONF_CONSUMPTION = 'consumption'
 
 smartboiler_controller_ns = cg.esphome_ns.namespace('sb')
 
 SmartBoiler = smartboiler_controller_ns.class_(
-    'SmartBoiler', cg.Component, ble_client.BLEClientNode)
+    'SmartBoiler', cg.PollingComponent, ble_client.BLEClientNode)
 
 SmartBoilerModeSelect = smartboiler_controller_ns.class_('SmartBoilerModeSelect', select.Select)
 SmartBoilerThermostat = smartboiler_controller_ns.class_('SmartBoilerThermostat', climate.Climate)
 
-CONFIG_SCHEMA = cv.Schema({
+CONFIG_SCHEMA = cv.polling_component_schema('30s').extend({
     cv.GenerateID(): cv.declare_id(SmartBoiler),
     cv.Optional(CONF_TOPIC, "smartboiler"): cv.string,
     cv.Optional(CONF_TEMP1): sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, icon=ICON_THERMOMETER, accuracy_decimals=1).extend(),
@@ -38,6 +39,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_THERMOSTAT): climate.CLIMATE_SCHEMA.extend({
         cv.GenerateID(): cv.declare_id(SmartBoilerThermostat),
     }),
+    cv.Optional(CONF_CONSUMPTION): sensor.sensor_schema(unit_of_measurement="Wh", icon=ICON_FLASH, accuracy_decimals=1).extend(),
 }).extend(ble_client.BLE_CLIENT_SCHEMA)
 
 async def to_code(config):
@@ -52,6 +54,10 @@ async def to_code(config):
     if CONF_TEMP2 in config:
         sens = await sensor.new_sensor(config[CONF_TEMP2])
         cg.add(var.set_temp2(sens))
+
+    if CONF_CONSUMPTION in config:
+        sens = await sensor.new_sensor(config[CONF_CONSUMPTION])
+        cg.add(var.set_consumption(sens))
 
     if CONF_HDO_LOW_TARIFF in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_HDO_LOW_TARIFF])
