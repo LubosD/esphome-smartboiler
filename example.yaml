@@ -41,5 +41,5 @@ smartboiler:
     name: boiler_thermostat
   consumption:
     name: boiler_consumption
-    state_class: measurement
+    state_class: total_increasing
     device_class: energy
