@@ -77,7 +77,7 @@ substitutions:
 external_components:
   - source: 
       type: git
-      url: https://github.com/pedobry/esphome_smartboiler
+      url: https://github.com/pedobry/esphome-smartboiler
     components: [smartboiler]
 
 logger:
