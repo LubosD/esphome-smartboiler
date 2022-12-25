@@ -1,45 +1,78 @@
+esphome:
+  name: "test-node"
+
+esp32:
+  board: nodemcu-32s
+  framework:
+    type: arduino
+
 substitutions:
-  mac_address: F2:30:EC:1E:B7:E3
-  mqtt_broker: 10.10.10.3
+  mac_boiler: XX:XX:XX:XX:XX:XX
+  mqtt_broker: 192.168.1.100
 
 external_components:
-  - source:
-      type: local
-      path: components
+  - source: 
+      type: git
+      url: https://github.com/pedobry/esphome_smartboiler
+    components: [smartboiler]
 
 mqtt:
   broker: ${mqtt_broker}
 
-sensor:
-
-binary_sensor:
-
-select:
-
-climate:
-
-esp32_ble_tracker:
-
 ble_client:
-  - mac_address: ${mac_address}
+  - mac_address: ${mac_boiler}
     id: drazice_okhe
 
 smartboiler:
-  ble_client_id: drazice_okhe
-  topic_prefix: smartboiler
-  temp1:
-    name: boiler_temp1
-  temp2:
-    name: boiler_temp2
-  hdo_low_tariff:
-    name: hdo_low_tariff
-  heat_on:
-    name: boiler_heat_on
-  mode:
-    name: boiler_mode
-  thermostat:
-    name: boiler_thermostat
-  consumption:
-    name: boiler_consumption
-    state_class: total_increasing
-    device_class: energy
+  - ble_client_id: drazice_okhe
+    temp1:
+      name: "Boiler temp1"
+    temp2:
+      name: "Boiler temp2"
+    mode:
+      name: "Boiler mode"
+    thermostat:
+      name: "Boiler thermostat"
+    heat_on:
+      name: "Boiler heat"
+    hdo_low_tariff:
+      name: "Boiler HDO"
+    pin:
+      name: "Boiler PIN"
+    state:
+      name: "Boiler state"
+    version:
+      name: "Boiler version"
+    b_name:
+      name: "Boiler name"
+    consumption:
+      name: "Boiler energy"
+
+sensor:
+  - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
+    name: "WiFi Signal dB"
+    id: boiler_wifi_signal_db
+    update_interval: 60s
+    entity_category: "diagnostic"
+
+  - platform: copy # Reports the WiFi signal strength in %
+    source_id: boiler_wifi_signal_db
+    name: "WiFi Signal Percent"
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "Signal %"
+    entity_category: "diagnostic"
+
+switch:
+  - platform: ble_client
+    ble_client_id: drazice_okhe
+    name: "Enable boiler monitoring"
+
+ota:
+  password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi1_ssid
+  password: !secret wifi1_psk
+
+

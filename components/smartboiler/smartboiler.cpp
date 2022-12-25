@@ -1,5 +1,8 @@
 #include "smartboiler.h"
 #include "esphome/core/application.h"
+#include "esphome/components/md5/md5.h"
+
+#define UUID_LENGTH 6
 
 static const char *const TAG = "smartboiler";
 
@@ -13,610 +16,461 @@ static const uint16_t SB_MAIN_CHARACTERISTIC_UUID = 0x2B99;
 // Responses arrive through this characteristic
 static const uint16_t SB_LOGGING_SERVICE_UUID = 0x1898;
 static const uint16_t SB_LOGGING_CHARACTERISTIC_UUID = 0x2B98;
+static const uint16_t CLIENT_CHARACTERISTIC_CONFIG_DESCRIPTOR_UUID = 0x2902;
 
-namespace SbcPacket {
-	enum {
-		// GetAllBasicInfo = 0x0c,
-		Model = 0x02,
-		FwVersion = 0x03,
-		Mode = 0x04,
-		HeatOn = 0x06,
-		Sensor1 = 0x07,
-		Sensor2 = 0x08,
-		Temperature = 0x09,
-		Time = 0x0b,
-		HdoEnabled = 0x14,
-		LastHdoTime = 0x20,
-		HdoLowTariff = 0x21,
-		HdoInfo = 0x22,
-		UidResponse = 0x33,
-		Capacity = 0x3a,
-		Name = 0x50,
+static const int COMMAND_DELAY = 100;
 
-		SetNormalTemperature = 0x0e,
-		SetMode = 0x12,
-		SetHdoEnabled = 0x1B,
-
-		// Individual requests, replies come back as UidResponse
-		ConsumptionStatsGetAll = 0x5d,
-
-		RequestError = 0x34,
-	};
+void SmartBoiler::restore_state_() {
+  SavedSmartBoilerSettings recovered{};
+  this->pref_ = global_preferences->make_preference<SavedSmartBoilerSettings>(this->thermostat_->get_object_id_hash());
+  bool restored = this->pref_.load(&recovered);
+  if (restored) {
+    this->uid_ = recovered.uid;
+    ESP_LOGD(TAG, "using stored UID: %s", this->uid_.c_str());
+  }
 }
 
-// This is our ID, it's not related to the protocol.
-// Ideally, we would use a counter and use that counter to match replies to requests.
-static const uint8_t UID_CONSUMPTION = 0xcc;
-
-static const char* modeStrings[] = {
-	"STOP", "NORMAL", "HDO", "SMART", "SMARTHDO", "ANTIFROST", "NIGHT", "TEST"
-};
-
-SmartBoiler::SmartBoiler()
-{
+void SmartBoiler::save_state_() {
+  SavedSmartBoilerSettings state{};
+  strcpy(state.uid, this->uid_.c_str());
+  this->pref_.save(&state);
 }
 
-void SmartBoiler::setup()
-{
-	subscribe(root_topic_ + "set_temperature", &SmartBoiler::on_set_temperature);
-	subscribe(root_topic_ + "set_mode", &SmartBoiler::on_set_mode);
-	subscribe(root_topic_ + "set_hdo_enabled", &SmartBoiler::on_set_hdo_enabled);
-
-	publish(root_topic_ + "boiler_online", "0", 0, true);
-
-	esphome::mqtt::MQTTMessage lastWill = {
-		.topic = root_topic_ + "boiler_online",
-		.payload = "0",
-	};
-
-	esphome::mqtt::global_mqtt_client->set_last_will(std::move(lastWill));
+void SmartBoiler::setup() {
+  ESP_LOGD(TAG, "Setup()");
+  this->restore_state_();
+  if (this->uid_.size() == 0) {
+    this->uid_ = this->generateUUID();
+    ESP_LOGD(TAG, "generated new UUID: %s", this->uid_.c_str());
+    this->save_state_();
+  }
+  this->state_txt_->publish_state(this->state_to_string(this->state_));
 }
 
-void SmartBoiler::dump_config()
-{
-	ESP_LOGCONFIG(TAG, "SmartBoiler:");
-
-	LOG_SENSOR("  ", "Device", temperature_sensor_1_sensor_);
-	LOG_SENSOR("  ", "Device", temperature_sensor_2_sensor_);
-	LOG_SENSOR("  ", "Consumption", consumption_sensor_);
-	LOG_BINARY_SENSOR("  ", "Device", hdo_low_tariff_sensor_);
-	LOG_SELECT("  ", "Mode", mode_select_);
-	LOG_CLIMATE("  ", "Thermostat", thermostat_);
+void SmartBoiler::dump_config() {
+  ESP_LOGCONFIG(TAG, "SmartBoiler:");
+  LOG_SENSOR("  ", "Temp1", temperature_sensor_1_sensor_);
+  LOG_SENSOR("  ", "Temp2", temperature_sensor_2_sensor_);
+  LOG_SENSOR("  ", "Consumption", consumption_sensor_);
+  LOG_BINARY_SENSOR("  ", "HDO", hdo_low_tariff_sensor_);
+  LOG_SELECT("  ", "Mode", mode_select_);
+  LOG_CLIMATE("  ", "Thermostat", thermostat_);
+  LOG_NUMBER("  ", "Pairing PIN", mPin_);
+  LOG_TEXT_SENSOR("  ", "Version", version_);
+  LOG_TEXT_SENSOR("  ", "State", state_txt_);
 }
 
-void SmartBoiler::send_to_boiler(uint8_t* frame, size_t length)
-{
-	auto status = esp_ble_gattc_write_char(this->parent_->gattc_if, this->parent_->conn_id, this->char_handle_,
-								length, frame, ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
+void SmartBoiler::loop() { this->process_command_queue_(); }
 
-	if (status)
-		ESP_LOGW(TAG, "[%s] esp_ble_gattc_write_char failed, status=%d", this->parent_->address_str().c_str(), status);
+void SmartBoiler::send_to_boiler(SBProtocolRequest request) {
+  this->last_command_timestamp_ = millis();
+  ESP_LOGD(TAG, "Sending: REQ: %d DATA=[%s]", request.mRqType, format_hex_pretty(request.mData).c_str());
+  auto status = esp_ble_gattc_write_char(this->parent_->get_gattc_if(), this->parent_->get_conn_id(),
+                                         this->char_handle_, request.mData.size(), request.mData.data(),
+                                         ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
+
+  if (status)
+    ESP_LOGW(TAG, "[%s] esp_ble_gattc_write_char failed, status=%d", this->parent_->address_str().c_str(), status);
 }
 
-void SmartBoiler::on_set_temperature(const std::string &payload)
-{
-	auto tempOpt = parse_number<int>(payload);
-	if (!tempOpt)
-	{
-		ESP_LOGW(TAG, "Invalid set_temperature value: %s", payload.c_str());
-		return;
-	}
-
-	int temp = *tempOpt;
-
-	if (temp < 5 || temp > 74)
-	{
-		ESP_LOGW(TAG, "Invalid set temperature: %d", temp);
-		return;
-	}
-
-	uint8_t frame[] = {
-		SbcPacket::SetNormalTemperature, 0x00, 0x00, 0x00, uint8_t(temp & 0xff), 0x00, 0x00, 0x00
-	};
-
-	send_to_boiler(frame, sizeof(frame));
+void SmartBoiler::on_set_temperature(uint8_t temp) {
+  if (temp < MIN_TEMP || temp > MAX_TEMP) {
+    ESP_LOGW(TAG, "Invalid set temperature: %d", temp);
+    return;
+  }
+  auto cmd = SBProtocolRequest(SBC_PACKET_HOME_SETNORMALTEMPERATURE, this->mPacketUid++);
+  cmd.write_le((uint32_t) temp);
+  this->enqueue_command_(cmd);
 }
 
-void SmartBoiler::on_set_temperature_int(int temp)
-{
-	if (temp < 5 || temp > 74)
-	{
-		ESP_LOGW(TAG, "Invalid set temperature: %d", temp);
-		return;
-	}
+uint8_t SmartBoiler::convert_action_to_mode(const std::string &payload) {
+  uint8_t mode;
+  auto modeStr = str_upper_case(payload);
 
-	uint8_t frame[] = {
-		SbcPacket::SetNormalTemperature, 0x00, 0x00, 0x00, uint8_t(temp & 0xff), 0x00, 0x00, 0x00
-	};
-
-	send_to_boiler(frame, sizeof(frame));
+  if (modeStr == "STOP")
+    mode = 0;
+  else if (modeStr == "NORMAL")
+    mode = 1;
+  else if (modeStr == "HDO")
+    mode = 2;
+  else if (modeStr == "SMART")
+    mode = 3;
+  else if (modeStr == "SMARTHDO")
+    mode = 4;
+  else if (modeStr == "ANTIFROST")
+    mode = 5;
+  else if (modeStr == "NIGHT")
+    mode = 6;
+  else {
+    ESP_LOGW(TAG, "Unknown boiler mode set: %s", payload.c_str());
+  }
+  return mode;
 }
 
-void SmartBoiler::on_set_mode(const std::string &payload)
-{
-	uint8_t mode;
-	auto modeStr = str_upper_case(payload);
-
-	if (modeStr == "STOP")
-		mode = 0;
-	else if (modeStr == "NORMAL")
-		mode = 1;
-	else if (modeStr == "HDO")
-		mode = 2;
-	else if (modeStr == "SMART")
-		mode = 3;
-	else if (modeStr == "SMARTHDO")
-		mode = 4;
-	else if (modeStr == "ANTIFROST")
-		mode = 5;
-	else if (modeStr == "NIGHT")
-		mode = 6;
-	else
-	{
-		ESP_LOGW(TAG, "Unknown boiler mode set: %s", payload.c_str());
-		return;
-	}
-
-	uint8_t frame[] = {
-		SbcPacket::SetMode, 0x00, 0x00, 0x00, mode, 0x00, 0x00, 0x00
-	};
-
-	send_to_boiler(frame, sizeof(frame));
+void SmartBoiler::on_set_mode(const std::string &payload) {
+  auto mode = this->convert_action_to_mode(payload);
+  auto cmd = SBProtocolRequest(SBC_PACKET_HOME_SETMODE, this->mPacketUid++);
+  cmd.write_le(uint32_t(mode));
+  this->enqueue_command_(cmd);
 }
 
-void SmartBoiler::on_set_hdo_enabled(const std::string &payload)
-{
-	auto hdoOpt = parse_number<int>(payload);
-	if (!hdoOpt)
-	{
-		ESP_LOGW(TAG, "Invalid set_hdo_enabled value: %s", payload.c_str());
-		return;
-	}
-
-	uint8_t frame[] = {
-		SbcPacket::SetHdoEnabled, 0x00, 0x00, 0x00, uint8_t(*hdoOpt ? 1 : 0), 0x00, 0x00, 0x00
-	};
-
-	send_to_boiler(frame, sizeof(frame));
+void SmartBoiler::on_set_hdo_enabled(const std::string &payload) {
+  auto hdoOpt = parse_number<int>(payload);
+  if (!hdoOpt) {
+    ESP_LOGW(TAG, "Invalid set_hdo_enabled value: %s", payload.c_str());
+    return;
+  }
+  auto cmd = SBProtocolRequest(SBC_PACKET_HDO_SET_ONOFF, this->mPacketUid++);
+  cmd.write_le(uint32_t(*hdoOpt ? 1 : 0));
+  this->enqueue_command_(cmd);
 }
 
 void SmartBoiler::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
-                           esp_ble_gattc_cb_param_t *param)
-{
-	switch (event)
-	{
-		case ESP_GATTC_OPEN_EVT:
-		{
-			if (param->open.status == ESP_GATT_OK)
-			{
-				ESP_LOGI(TAG, "[%s] Connected",
-							this->parent_->address_str().c_str());
-			}
-			break;
-    	}
-    	case ESP_GATTC_DISCONNECT_EVT:
-		{
-			ESP_LOGI(TAG, "[%s] Disconnected",
-						this->parent_->address_str().c_str());
+                                      esp_ble_gattc_cb_param_t *param) {
+  switch (event) {
+    case ESP_GATTC_OPEN_EVT: {
+      if (param->open.status == ESP_GATT_OK) {
+        ESP_LOGI(TAG, "[%s] Connected", this->parent_->address_str().c_str());
+      }
+      break;
+    }
+    case ESP_GATTC_DISCONNECT_EVT: {
+      ESP_LOGI(TAG, "[%s] Disconnected", this->parent_->address_str().c_str());
+      this->set_state(ConnectionState::DISCONNECTED);
+      break;
+    }
+    case ESP_GATTC_SEARCH_CMPL_EVT: {
+      auto chr = this->parent_->get_characteristic(SB_MAIN_SERVICE_UUID, SB_MAIN_CHARACTERISTIC_UUID);
+      if (chr == nullptr) {
+        ESP_LOGE(TAG, "[%s] No main service found at device, not a SmartBoiler..?",
+                 this->parent_->address_str().c_str());
+        this->parent_->disconnect();
+        break;
+      }
 
-			publish(root_topic_ + "boiler_online", "0", 0, true);
-			online_ = false;
-			break;
-		}
-		case ESP_GATTC_SEARCH_CMPL_EVT:
-		{
-			auto *chr = this->parent_->get_characteristic(SB_MAIN_SERVICE_UUID, SB_MAIN_CHARACTERISTIC_UUID);
-			if (chr == nullptr)
-			{
-				ESP_LOGE(TAG, "[%s] No main service found at device, not a SmartBoiler..?",
-						this->parent_->address_str().c_str());
-				break;
-			}
+      this->char_handle_ = chr->handle;
 
-			this->char_handle_ = chr->handle;
+      chr = this->parent_->get_characteristic(SB_LOGGING_SERVICE_UUID, SB_LOGGING_CHARACTERISTIC_UUID);
 
-			chr = this->parent_->get_characteristic(SB_LOGGING_SERVICE_UUID, SB_LOGGING_CHARACTERISTIC_UUID);
+      if (chr == nullptr) {
+        ESP_LOGE(TAG, "[%s] No logging service found at device, not a SmartBoiler..?",
+                 this->parent_->address_str().c_str());
+        this->parent_->disconnect();
+        break;
+      }
+      auto status = esp_ble_gattc_register_for_notify(this->parent()->get_gattc_if(), this->parent()->get_remote_bda(),
+                                                      chr->handle);
+      if (status) {
+        ESP_LOGW(TAG, "esp_ble_gattc_register_for_notify failed, status=%d", status);
+        break;
+      }
 
-			if (chr == nullptr)
-			{
-				ESP_LOGE(TAG, "[%s] No logging service found at device, not a SmartBoiler..?",
-						this->parent_->address_str().c_str());
-				break;
-			}
-
-			auto status = esp_ble_gattc_register_for_notify(this->parent()->gattc_if, this->parent()->remote_bda, chr->handle);
-			if (status)
-			{
-				ESP_LOGW(TAG, "esp_ble_gattc_register_for_notify failed, status=%d", status);
-				break;
-			}
-
-			break;
-		}
-		case ESP_GATTC_REG_FOR_NOTIFY_EVT:
-		{
-			ESP_LOGI(TAG, "Send our UID");
-
-			// This is the 1st command we need to send or the boiler disconnects and won't accept our commands
-			uint8_t frame[] = {
-				0x44, 0x00, 0x00, 0x00, 0x74, 0x39, 0x70, 0x61, 0x71, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-			};
-
-			send_to_boiler(frame, sizeof(frame));
-
-			delay(50);
-			request_value(SbcPacket::HdoEnabled);
-			delay(50);
-			request_value(SbcPacket::LastHdoTime);
-			delay(50);
-			request_value(SbcPacket::HdoInfo);
-			delay(50);
-			request_value(SbcPacket::HdoLowTariff);
-			delay(50);
-
-			// Using GetAllBasicInfo seems to cause strange issues (overload?), so let's ask separately
-			request_value(SbcPacket::Model);
-			delay(50);
-			request_value(SbcPacket::FwVersion);
-			delay(50);
-			request_value(SbcPacket::Mode);
-			delay(50);
-			request_value(SbcPacket::HeatOn);
-			delay(50);
-			request_value(SbcPacket::Sensor1);
-			delay(50);
-			request_value(SbcPacket::Sensor2);
-			delay(50);
-			request_value(SbcPacket::Temperature);
-			delay(50);
-			request_value(SbcPacket::Capacity);
-			delay(50);
-			request_value(SbcPacket::Name);
-
-			break;
-		}
-		case ESP_GATTC_NOTIFY_EVT:
-		{
-			handle_incoming(param->notify.value, param->notify.value_len);
-			break;
-		}
-		default:
-		{
-			break;
-		}
-	}
+      break;
+    }
+    case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+      this->authenticate();
+      break;
+    }
+    case ESP_GATTC_NOTIFY_EVT: {
+      handle_incoming(param->notify.value, param->notify.value_len);
+      break;
+    }
+  }
 }
 
-void SmartBoiler::update()
-{
-	if (!online_)
-		return;
-
-	ESP_LOGD(TAG, "Requesting consumption");
-	request_value(SbcPacket::ConsumptionStatsGetAll, UID_CONSUMPTION);
+void SmartBoiler::authenticate() {
+  ESP_LOGD(TAG, "Sending authentication request.");
+  auto cmd = SBProtocolRequest(SBPacket::SBC_PACKET_RQ_GLOBAL_MAC);
+  cmd.writeString(this->uid_);
+  this->enqueue_command_(cmd);
+  this->set_state(ConnectionState::AUTHENTICATING);
 }
 
-void SmartBoiler::request_value(uint8_t value, uint8_t uid)
-{
-	uint8_t frame[] = {
-		value, 0x00, uid, 0x00, 0x00, 0x00, 0x00, 0x00
-	};
-
-	send_to_boiler(frame, sizeof(frame));
+void SmartBoiler::getInitData() {
+  ESP_LOGD(TAG, "Requesting initial data from boiler");
+  this->request_value(SBPacket::SBC_PACKET_HOME_MODE);
+  this->request_value(SBPacket::SBC_PACKET_HOME_BOILERMODEL);
+  this->request_value(SBPacket::SBC_PACKET_HOME_CAPACITY);
+  this->request_value(SBPacket::SBC_PACKET_HOME_BOILERNAME);
+  this->request_value(SBPacket::SBC_PACKET_HOME_TEMPERATURE);
+  this->request_value(SBPacket::SBC_PACKET_HOME_SENSOR1);
+  this->request_value(SBPacket::SBC_PACKET_HOME_SENSOR2);
+  this->request_value(SBPacket::SBC_PACKET_HOME_HSRCSTATE);
+  this->request_value(SBPacket::SBC_PACKET_HDO_ONOFF);
 }
 
-void SmartBoiler::set_root_topic(const std::string &value)
-{
-	root_topic_ = value;
-
-	if (!root_topic_.empty())
-		root_topic_ += "/";
+void SmartBoiler::update() {
+  if (this->state_ == ConnectionState::CONNECTED) {
+    ESP_LOGD(TAG, "Requesting consumption");
+    auto cmd = SBProtocolRequest(SBC_PACKET_STATISTICS_GETALL, this->mPacketUid++);
+    this->enqueue_command_(cmd);
+  }
 }
 
-void SmartBoiler::handle_incoming(const uint8_t *data, uint16_t length)
-{
-	// First two bytes contain a decimal value from SbcPacket as a string
-	uint8_t cmd = (data[0] - '0') * 10 + (data[1] - '0');
-	std::string arg((const char*) data+2, length-2);
-
-	if (!online_)
-	{
-		online_ = true;
-		publish(root_topic_ + "boiler_online", "1", 0, true);
-	}
-
-	ESP_LOGI(TAG, "Received data from boiler: cmd=0x%x, %s, %d bytes", cmd, arg.c_str(), length - 2);
-
-	switch (cmd)
-	{
-		case SbcPacket::FwVersion:
-		{
-			// Format: firmware;board revision;serial number
-			auto firstSemicol = arg.find(';');
-
-			if (firstSemicol != std::string::npos)
-			{
-				auto secondSemicol = arg.find(';', firstSemicol+1);
-
-				if (secondSemicol != std::string::npos)
-				{
-					publish(root_topic_ + "fw_version", arg.substr(0, firstSemicol), 0, true);
-					publish(root_topic_ + "board_rev", arg.substr(firstSemicol+1, secondSemicol-firstSemicol-1), 0, true);
-					publish(root_topic_ + "serial", arg.substr(secondSemicol+1), 0, true);
-
-					break;
-				}
-			}
-
-			ESP_LOGW(TAG, "Bad FW info format: %s", arg.c_str());
-			
-			break;
-		}
-
-		case SbcPacket::Mode:
-		{
-			auto modeOpt = parse_number<int>(arg);
-			if (!modeOpt)
-			{
-				ESP_LOGW(TAG, "Bad mode string from boiler: %s", arg.c_str());
-				break;
-			}
-
-			int mode = *modeOpt;
-
-			if (mode >= 0 && mode < sizeof(modeStrings) / sizeof(modeStrings[0]))
-			{
-				publish(root_topic_ + "mode", modeStrings[mode], 0, true);
-
-				is_stopped_ = mode == 0;
-
-				if (mode_select_)
-					mode_select_->publish_state(modeStrings[mode]);
-			}
-			else
-				ESP_LOGW(TAG, "Bad mode value from boiler: %d", mode);
-
-			break;
-		}
-
-		case SbcPacket::Temperature:
-		{
-			auto tempOpt = parse_number<int>(arg);
-			if (!tempOpt)
-			{
-				ESP_LOGW(TAG, "Bad set temp value from boiler: %s", arg.c_str());
-				break;
-			}
-
-			if (thermostat_)
-				thermostat_->publish_target_temp(*tempOpt);
-
-			publish(root_topic_ + "temperature", to_string(*tempOpt), 0, true);
-			break;
-		}
-
-		case SbcPacket::UidResponse: {
-			switch (data[2])
-			{
-				case UID_CONSUMPTION:
-				{
-					uint32_t consumption;
-
-					consumption = data[4];
-					consumption |= uint32_t(data[5]) << 8;
-					consumption |= uint32_t(data[6]) << 16;
-					consumption |= uint32_t(data[7]) << 24;
-
-					ESP_LOGD(TAG, "Consumption: %d Wh", consumption);
-
-					if (consumption_sensor_)
-						consumption_sensor_->publish_state(consumption);
-					break;
-				}
-				default:
-				{
-					ESP_LOGW(TAG, "Unknown response UID: 0x%x", data[0]);
-				}
-			}
-		}
-
-		case SbcPacket::Time:
-		{
-			// format: weekday.time
-			// weekday is 0-6
-			publish(root_topic_ + "time", arg.substr(2));
-			break;
-		}
-
-		case SbcPacket::Name:
-		{
-			publish(root_topic_ + "name", arg, 0, true);
-			break;
-		}
-
-		case SbcPacket::HdoEnabled:
-		{
-			auto onoffOpt = parse_number<int>(arg);
-			if (!onoffOpt)
-			{
-				ESP_LOGW(TAG, "Bad HDO state from boiler: %s", arg.c_str());
-				break;
-			}
-
-			publish(root_topic_ + "hdo_enabled", *onoffOpt ? "1" : "0", 0, true);
-			break;
-		}
-
-		case SbcPacket::LastHdoTime:
-		{
-			publish(root_topic_ + "last_hdo_time", arg.substr(2), 0, true);
-			break;
-		}
-
-		case SbcPacket::HdoInfo:
-		{
-			publish(root_topic_ + "hdo_info", arg, 0, true);
-			break;
-		}
-
-		case SbcPacket::Sensor1:
-		{
-			publish(root_topic_ + "sensor1", arg, 0, true);
-			if (temperature_sensor_1_sensor_)
-			{
-				auto sensor1 = parse_number<float>(arg);
-				if (sensor1)
-					temperature_sensor_1_sensor_->publish_state(*sensor1);
-			}
-			break;
-		}
-
-		case SbcPacket::Sensor2:
-		{
-			publish(root_topic_ + "sensor2", arg, 0, true);
-
-			auto sensor2 = parse_number<float>(arg);
-			if (sensor2)
-			{
-				if (temperature_sensor_2_sensor_)
-					temperature_sensor_2_sensor_->publish_state(*sensor2);
-				if (thermostat_)
-					thermostat_->publish_current_temp(*sensor2);
-			}
-			break;
-		}
-
-		case SbcPacket::Capacity:
-		{
-			publish(root_topic_ + "capacity", arg, 0, true);
-			break;
-		}
-
-		case SbcPacket::Model:
-		{
-			publish(root_topic_ + "model", arg, 0, true);
-			break;
-		}
-
-		case SbcPacket::HdoLowTariff:
-		{
-			auto onoffOpt = parse_number<int>(arg);
-			if (!onoffOpt)
-			{
-				ESP_LOGW(TAG, "Bad HDO state from boiler: %s", arg.c_str());
-				break;
-			}
-
-			if (hdo_low_tariff_sensor_)
-			{
-				bool hdo_low_tariff = !!*onoffOpt;
-				hdo_low_tariff_sensor_->publish_state(hdo_low_tariff);
-			}
-
-			publish(root_topic_ + "hdo_low_tariff", *onoffOpt ? "1" : "0", 0, true);
-			break;
-		}
-
-		case SbcPacket::HeatOn:
-		{
-			auto onoffOpt = parse_number<int>(arg);
-			if (!onoffOpt)
-			{
-				ESP_LOGW(TAG, "Bad heat source state from boiler: %s", arg.c_str());
-				break;
-			}
-
-			bool heat_on = !!*onoffOpt;
-			if (heat_on_sensor_)
-				heat_on_sensor_->publish_state(heat_on);
-			if (thermostat_)
-				thermostat_->publish_action(is_stopped_, heat_on);
-
-			publish(root_topic_ + "heat_on", *onoffOpt ? "1" : "0", 0, true);
-			break;
-		}
-
-		case SbcPacket::RequestError:
-		{
-			ESP_LOGW(TAG, "Boiler indicates that the last request has failed");
-			break;
-		}
-	}
+void SmartBoiler::request_value(SBPacket sensor, uint16_t uid) {
+  this->enqueue_command_(SBProtocolRequest(sensor, uid));
 }
 
-void SmartBoiler::set_mode(SmartBoilerModeSelect *s)
-{
-	mode_select_ = s;
-	s->set_parent(this);
+void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
+  auto result = SBProtocolResult(value, value_len);
+
+  ESP_LOGD(TAG, "Received: REQ: %d DATA=[%s]", result.mRqType, format_hex_pretty(value, value_len).c_str());
+
+  switch (result.mRqType) {
+    case SBPacket::SBC_PACKET_GLOBAL_PAIRPIN: {
+      ESP_LOGD(TAG, "PIN pairing required.");
+      // boiler requires pairing of this client via PIN
+      this->set_state(ConnectionState::NEED_PIN);
+      break;
+    }
+    case SBPacket::SBC_PACKET_GLOBAL_CONFIRMUID: {
+      // all setting commands are sent with unique packet UID and confirmation from BT
+      // server is expected. Most of them contain no additional data, with exception of
+      // SBC_PACKET_STATISTICS_GETALL
+      ESP_LOGD(TAG, "Received confirmation for packet with UID: %02X", result.mUid);
+      ESP_LOGD(TAG, "mByteData: DATA=[%s]", format_hex_pretty(result.mByteData).c_str());
+
+      // find original request in queue of sent packets
+      auto originalRequest = std::find_if(this->sent_queue_.begin(), this->sent_queue_.end(),
+                                          [&](const SBProtocolRequest &req) { return req.mUid == result.mUid; });
+      if (originalRequest != std::end(this->sent_queue_)) {
+        ESP_LOGD(TAG, "original request was: %d", (*originalRequest).mRqType);
+        // remove the sent request from the queue as it was sucessfully accepted
+        this->sent_queue_.erase(originalRequest);
+
+        // handle some special confirm packets
+        switch ((*originalRequest).mRqType) {
+          case SBPacket::SBC_PACKET_STATISTICS_GETALL: {
+            uint32_t consumption = result.load_uint32_le(0);
+            uint32_t timestamp = result.load_uint32_le(4);
+            if (this->consumption_sensor_)
+              this->consumption_sensor_->publish_state((float) consumption / 1000);
+            break;
+          }
+        }
+      }
+      break;
+    }
+    case SBPacket::SBC_PACKET_GLOBAL_DEVICEBONDED: {
+      ESP_LOGI(TAG, "Device is already paired with the boiler.");
+      this->set_state(ConnectionState::CONNECTED);
+      this->getInitData();
+      break;
+    }
+    case SBPacket::SBC_PACKET_GLOBAL_PINRESULT: {
+      auto pinResult = parse_number<int>(result.mString);
+      if (pinResult.has_value() && pinResult.value() == 1) {
+        ESP_LOGI(TAG, "PIN is correct.");
+        this->set_state(ConnectionState::CONNECTED);
+        this->getInitData();
+      } else {
+        ESP_LOGW(TAG, "Wrong PIN provided, boiler response: %s", result.mString);
+      }
+      break;
+    }
+
+    case SBPacket::SBC_PACKET_HOME_FWVERSION: {
+      // Format: firmware;board revision;serial number
+      auto firstSemicol = result.mString.find(';');
+      if (firstSemicol != std::string::npos) {
+        auto secondSemicol = result.mString.find(';', firstSemicol + 1);
+        if (secondSemicol != std::string::npos) {
+          auto fwVersion = result.mString.substr(0, firstSemicol);
+          auto boardRev = result.mString.substr(firstSemicol + 1, secondSemicol - firstSemicol - 1);
+          auto serial = result.mString.substr(secondSemicol + 1);
+          char buffer[100];
+          sprintf(buffer, "fw:%s, board: %s, S/N: %s", fwVersion.c_str(), boardRev.c_str(), serial.c_str());
+          std::string version(buffer);
+          this->version_->publish_state(version);
+          break;
+        }
+      }
+      ESP_LOGW(TAG, "Bad FW info format: %s", result.mString);
+      break;
+    }
+
+    case SBPacket::SBC_PACKET_HOME_MODE: {
+      auto modeOpt = parse_number<int>(result.mString);
+      if (!modeOpt.has_value()) {
+        ESP_LOGW(TAG, "Bad mode string from boiler: %s", result.mString);
+        break;
+      }
+      auto mode = modeOpt.value();
+      if (mode >= 0 && mode < sizeof(modeStrings) / sizeof(modeStrings[0])) {
+        if (mode_select_)
+          mode_select_->publish_state(modeStrings[mode]);
+      } else
+        ESP_LOGW(TAG, "Bad mode value from boiler: %d", mode);
+      break;
+    }
+    case SBPacket::SBC_PACKET_HOME_TEMPERATURE: {
+      auto tempOpt = parse_number<float>(result.mString);
+      if (tempOpt.has_value()) {
+        this->thermostat_->publish_target_temp(*tempOpt);
+      }
+      break;
+    }
+    case SBPacket::SBC_PACKET_HOME_SENSOR1: {
+      auto tempOpt = parse_number<float>(result.mString);
+      if (tempOpt.has_value()) {
+        this->temperature_sensor_1_sensor_->publish_state(*tempOpt);
+      }
+      break;
+    }
+    case SBPacket::SBC_PACKET_HOME_SENSOR2: {
+      auto tempOpt = parse_number<float>(result.mString);
+      if (tempOpt.has_value()) {
+        this->temperature_sensor_2_sensor_->publish_state(*tempOpt);
+        if (this->thermostat_)
+          this->thermostat_->publish_current_temp(*tempOpt);
+      }
+      break;
+    }
+    case SBPacket::SBC_PACKET_HOME_HSRCSTATE: {
+      auto heatOpt = parse_number<int>(result.mString);
+      auto is_heating = *heatOpt == 1;
+      this->heat_on_sensor_->publish_state(is_heating);
+      if (thermostat_)
+        this->thermostat_->publish_action(is_heating);
+      break;
+    }
+    case SBPacket::SBC_PACKET_HDO_ONOFF: {
+      auto hdoOpt = parse_number<int>(result.mString);
+      this->hdo_low_tariff_sensor_->publish_state(hdoOpt.value() == 1);
+      break;
+    }
+    case SBPacket::SBC_PACKET_HOME_BOILERNAME: {
+      this->name_->publish_state(result.mString);
+      break;
+    }
+    case SBPacket::SBC_PACKET_HOME_ERROR: {
+      ESP_LOGW(TAG, "Boiler indicates that the last request has failed");
+      break;
+    }
+  }
 }
 
-void SmartBoiler::set_thermostat(SmartBoilerThermostat *t)
-{
-	thermostat_ = t;
-	t->set_parent(this);
+void SmartBoilerModeSelect::control(const std::string &value) {
+  if (value.find("HDO") != std::string::npos)
+    get_parent()->on_set_hdo_enabled("1");
+  else
+    get_parent()->on_set_hdo_enabled("0");
+
+  get_parent()->on_set_mode(value);
 }
 
-void SmartBoilerModeSelect::control(const std::string &value)
-{
-	if (value.find("HDO") != std::string::npos)
-		get_parent()->on_set_hdo_enabled("1");
-	else
-		get_parent()->on_set_hdo_enabled("0");
-
-	get_parent()->on_set_mode(value);
+void SmartBoilerThermostat::control(const esphome::climate::ClimateCall &call) {
+  if (call.get_target_temperature().has_value()) {
+    float tt = *call.get_target_temperature();
+    uint8_t target_temp = (uint8_t) tt;
+    get_parent()->on_set_temperature(target_temp);
+  }
 }
 
-SmartBoilerThermostat::SmartBoilerThermostat()
-{
-	this->mode = esphome::climate::CLIMATE_MODE_HEAT;
+esphome::climate::ClimateTraits SmartBoilerThermostat::traits() {
+  esphome::climate::ClimateTraits rv;
+
+  rv.set_visual_min_temperature(MIN_TEMP);
+  rv.set_visual_max_temperature(MAX_TEMP);
+  rv.set_visual_temperature_step(1);
+  rv.set_supports_current_temperature(true);
+  rv.set_supports_action(true);
+  rv.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT});
+
+  return rv;
 }
 
-void SmartBoilerThermostat::control(const esphome::climate::ClimateCall &call)
-{
-	auto tt = call.get_target_temperature();
-	if (tt)
-	{
-		int temp = *tt;
-		get_parent()->on_set_temperature_int(temp);
-	}
+void SmartBoilerThermostat::publish_target_temp(float temp) {
+  this->target_temperature = temp;
+  this->publish_state();
 }
 
-esphome::climate::ClimateTraits SmartBoilerThermostat::traits()
-{
-	esphome::climate::ClimateTraits rv;
-
-	rv.set_visual_min_temperature(0);
-	rv.set_visual_max_temperature(74);
-	rv.set_visual_temperature_step(1);
-	rv.set_supports_current_temperature(true);
-	rv.set_supports_action(true);
-	rv.set_supported_modes({ climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT });
-
-	return rv;
+void SmartBoilerThermostat::publish_current_temp(float temp) {
+  this->current_temperature = temp;
+  this->publish_state();
 }
 
-void SmartBoilerThermostat::publish_target_temp(float temp)
-{
-	this->target_temperature = temp;
-	publish_state();
+void SmartBoilerThermostat::publish_action(bool heating) {
+  if (get_parent()->mode_select_->state == "STOP")
+    this->action = esphome::climate::CLIMATE_ACTION_OFF;
+  else if (heating)
+    this->action = esphome::climate::CLIMATE_ACTION_HEATING;
+  else
+    this->action = esphome::climate::CLIMATE_ACTION_IDLE;
+  this->publish_state();
 }
 
-void SmartBoilerThermostat::publish_current_temp(float temp)
-{
-	this->current_temperature = temp;
-	publish_state();
+void SmartBoiler::enqueue_command_(const SBProtocolRequest &command) {
+  this->command_queue_.push_back(command);
+  this->process_command_queue_();
 }
 
-void SmartBoilerThermostat::publish_action(bool stopped, bool heating)
-{
-	if (stopped)
-		this->action = esphome::climate::CLIMATE_ACTION_OFF;
-	else if (heating)
-		this->action = esphome::climate::CLIMATE_ACTION_HEATING;
-	else
-		this->action = esphome::climate::CLIMATE_ACTION_IDLE;
-	publish_state();
+void SmartBoiler::process_command_queue_() {
+  uint32_t now = millis();
+  uint32_t cmdDelay = now - this->last_command_timestamp_;
+
+  if (cmdDelay > COMMAND_DELAY && !this->command_queue_.empty()) {
+    auto nextCmd = this->command_queue_.front();
+    this->send_to_boiler(nextCmd);
+    if (nextCmd.mUid) {
+      this->sent_queue_.push_back(nextCmd);
+    }
+    this->command_queue_.erase(this->command_queue_.begin());
+    ESP_LOGD(TAG, "Queue status - QUEUE=[%d], SENT_QUEUE=[%d]", this->command_queue_.size(), this->sent_queue_.size());
+  }
 }
 
+/**
+ * Generate random UUID for this device.
+ */
+std::string SmartBoiler::generateUUID() {
+  char sbuf[16];
+  md5::MD5Digest md5{};
+  md5.init();
+  sprintf(sbuf, "%08X", random_uint32());
+  md5.add(sbuf, 8);
+  md5.calculate();
+  md5.get_hex(sbuf);
+  ESP_LOGV(TAG, "Auth: Nonce is %s", sbuf);
+  std::string s(sbuf);
+  return s.substr(0, 6);
 }
+
+void SmartBoiler::send_pin(uint32_t pin) {
+  ESP_LOGD(TAG, "Sending PIN to boiler.");
+  auto cmd = SBProtocolRequest(SBC_PACKET_GLOBAL_PAIRPIN, this->mPacketUid++);
+  cmd.write_le(pin);
+  this->enqueue_command_(cmd);
 }
+
+const char *SmartBoiler::state_to_string(ConnectionState state) {
+  switch (state) {
+    case ConnectionState::CONNECTED:
+      return "Connected";
+    case ConnectionState::NEED_PIN:
+      return "Require PIN";
+    case ConnectionState::AUTHENTICATING:
+      return "Authenticating";
+    case ConnectionState::DISCONNECTED:
+      return "Disconnected";
+    default:
+      return "Unknown";
+  }
+}
+
+void SmartBoiler::set_state(ConnectionState newState) {
+  this->state_ = newState;
+  this->state_txt_->publish_state(this->state_to_string(newState));
+}
+
+void SmartBoilerPinInput::control(const float value) {
+  if (get_parent()->state_ == ConnectionState::NEED_PIN) {
+    uint32_t pin = floor(value);
+    get_parent()->send_pin(pin);
+  } else {
+    ESP_LOGW(TAG, "Device is not in pairing mode, PIN change is ignored.");
+  }
+}
+
+}  // namespace sb
+}  // namespace esphome
