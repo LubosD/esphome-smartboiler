@@ -102,7 +102,7 @@ uint8_t SmartBoiler::convert_action_to_mode(const std::string &payload) {
   else if (modeStr == "NIGHT")
     mode = 6;
   else {
-    ESP_LOGW(TAG, "Unknown boiler mode set: %s", payload.c_str());
+    ESP_LOGW(TAG, "Unknown water heater mode set: %s", payload.c_str());
   }
   return mode;
 }
@@ -187,7 +187,7 @@ void SmartBoiler::authenticate() {
 }
 
 void SmartBoiler::getInitData() {
-  ESP_LOGD(TAG, "Requesting initial data from boiler");
+  ESP_LOGD(TAG, "Requesting initial data from water heater");
   this->request_value(SBPacket::SBC_PACKET_HOME_MODE);
   this->request_value(SBPacket::SBC_PACKET_HOME_BOILERMODEL);
   this->request_value(SBPacket::SBC_PACKET_HOME_CAPACITY);
@@ -219,7 +219,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
   switch (result.mRqType) {
     case SBPacket::SBC_PACKET_GLOBAL_PAIRPIN: {
       ESP_LOGD(TAG, "PIN pairing required.");
-      // boiler requires pairing of this client via PIN
+      // water heater requires pairing of this client via PIN
       this->set_state(ConnectionState::NEED_PIN);
       break;
     }
@@ -252,7 +252,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
       break;
     }
     case SBPacket::SBC_PACKET_GLOBAL_DEVICEBONDED: {
-      ESP_LOGI(TAG, "Device is already paired with the boiler.");
+      ESP_LOGI(TAG, "Device is already paired with the water heater.");
       this->set_state(ConnectionState::CONNECTED);
       this->getInitData();
       break;
@@ -264,7 +264,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
         this->set_state(ConnectionState::CONNECTED);
         this->getInitData();
       } else {
-        ESP_LOGW(TAG, "Wrong PIN provided, boiler response: %s", result.mString);
+        ESP_LOGW(TAG, "Wrong PIN provided, water heater response: %s", result.mString);
       }
       break;
     }
@@ -292,7 +292,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
     case SBPacket::SBC_PACKET_HOME_MODE: {
       auto modeOpt = parse_number<int>(result.mString);
       if (!modeOpt.has_value()) {
-        ESP_LOGW(TAG, "Bad mode string from boiler: %s", result.mString);
+        ESP_LOGW(TAG, "Bad mode string from water heater: %s", result.mString);
         break;
       }
       auto mode = modeOpt.value();
@@ -300,7 +300,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
         if (mode_select_)
           mode_select_->publish_state(modeStrings[mode]);
       } else
-        ESP_LOGW(TAG, "Bad mode value from boiler: %d", mode);
+        ESP_LOGW(TAG, "Bad mode value from water heater: %d", mode);
       break;
     }
     case SBPacket::SBC_PACKET_HOME_TEMPERATURE: {
@@ -344,7 +344,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
       break;
     }
     case SBPacket::SBC_PACKET_HOME_ERROR: {
-      ESP_LOGW(TAG, "Boiler indicates that the last request has failed");
+      ESP_LOGW(TAG, "water heater indicates that the last request has failed");
       break;
     }
   }
@@ -437,7 +437,7 @@ std::string SmartBoiler::generateUUID() {
 }
 
 void SmartBoiler::send_pin(uint32_t pin) {
-  ESP_LOGD(TAG, "Sending PIN to boiler.");
+  ESP_LOGD(TAG, "Sending PIN to water heater.");
   auto cmd = SBProtocolRequest(SBC_PACKET_GLOBAL_PAIRPIN, this->mPacketUid++);
   cmd.write_le(pin);
   this->enqueue_command_(cmd);

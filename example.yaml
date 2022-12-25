@@ -7,7 +7,7 @@ esp32:
     type: arduino
 
 substitutions:
-  mac_boiler: XX:XX:XX:XX:XX:XX
+  mac_water_heater: XX:XX:XX:XX:XX:XX
   mqtt_broker: 192.168.1.100
 
 external_components:
@@ -20,43 +20,43 @@ mqtt:
   broker: ${mqtt_broker}
 
 ble_client:
-  - mac_address: ${mac_boiler}
+  - mac_address: ${mac_water_heater}
     id: drazice_okhe
 
 smartboiler:
   - ble_client_id: drazice_okhe
     temp1:
-      name: "Boiler temp1"
+      name: "Water heater temp1"
     temp2:
-      name: "Boiler temp2"
+      name: "Water heater temp2"
     mode:
-      name: "Boiler mode"
+      name: "Water heater mode"
     thermostat:
-      name: "Boiler thermostat"
+      name: "Water heater thermostat"
     heat_on:
-      name: "Boiler heat"
+      name: "Water heater heat"
     hdo_low_tariff:
-      name: "Boiler HDO"
+      name: "Water heater HDO"
     pin:
-      name: "Boiler PIN"
+      name: "Water heater PIN"
     state:
-      name: "Boiler state"
+      name: "Water heater state"
     version:
-      name: "Boiler version"
+      name: "Water heater version"
     b_name:
-      name: "Boiler name"
+      name: "Water heater name"
     consumption:
-      name: "Boiler energy"
+      name: "Water heater energy"
 
 sensor:
   - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
     name: "WiFi Signal dB"
-    id: boiler_wifi_signal_db
+    id: water_heater_wifi_signal_db
     update_interval: 60s
     entity_category: "diagnostic"
 
   - platform: copy # Reports the WiFi signal strength in %
-    source_id: boiler_wifi_signal_db
+    source_id: water_heater_wifi_signal_db
     name: "WiFi Signal Percent"
     filters:
       - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
@@ -66,7 +66,7 @@ sensor:
 switch:
   - platform: ble_client
     ble_client_id: drazice_okhe
-    name: "Enable boiler monitoring"
+    name: "Enable water heater monitoring"
 
 ota:
   password: !secret ota_password

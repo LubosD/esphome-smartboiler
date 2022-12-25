@@ -7,8 +7,8 @@ esp32:
     type: arduino
 
 substitutions:
-  mac_boiler_1: XX:XX:XX:XX:XX:XX
-  mac_boiler_2: YY:YY:YY:YY:YY:YY
+  mac_water_heater_1: XX:XX:XX:XX:XX:XX
+  mac_water_heater_2: YY:YY:YY:YY:YY:YY
   mqtt_broker: 192.168.1.100
 
 external_components:
@@ -24,68 +24,68 @@ mqtt:
   broker: ${mqtt_broker}
 
 ble_client:
-  - mac_address: ${mac_boiler_1}
+  - mac_address: ${mac_water_heater_1}
     id: drazice_okhe_1
-  - mac_address: ${mac_boiler_2}
+  - mac_address: ${mac_water_heater_2}
     id: drazice_okhe_2
 
 smartboiler:
   - ble_client_id: drazice_okhe_1
     temp1:
-      name: "Boiler 1 temp1"
+      name: "Water heater 1 temp1"
     temp2:
-      name: "Boiler 1 temp2"
+      name: "Water heater 1 temp2"
     mode:
-      name: "Boiler 1 mode"
+      name: "Water heater 1 mode"
     thermostat:
-      name: "Boiler 1 thermostat"
+      name: "Water heater 1 thermostat"
     heat_on:
-      name: "Boiler 1 heat"
+      name: "Water heater 1 heat"
     hdo_low_tariff:
-      name: "Boiler 1 HDO"
+      name: "Water heater 1 HDO"
     pin:
-      name: "Boiler 1 PIN"
+      name: "Water heater 1 PIN"
     state:
-      name: "Boiler 1 state"
+      name: "Water heater 1 state"
     version:
-      name: "Boiler 1 version"
+      name: "Water heater 1 version"
     b_name:
-      name: "Boiler 1 name"
+      name: "Water heater 1 name"
     consumption:
-      name: "Boiler 1 energy"
+      name: "Water heater 1 energy"
   - ble_client_id: drazice_okhe_2
     temp1:
-      name: "Boiler 2 temp1"
+      name: "Water heater 2 temp1"
     temp2:
-      name: "Boiler 2 temp2"
+      name: "Water heater 2 temp2"
     mode:
-      name: "Boiler 2 mode"
+      name: "Water heater 2 mode"
     thermostat:
-      name: "Boiler 2 thermostat"
+      name: "Water heater 2 thermostat"
     heat_on:
-      name: "Boiler 2 heat"
+      name: "Water heater 2 heat"
     hdo_low_tariff:
-      name: "Boiler 2 HDO"
+      name: "Water heater 2 HDO"
     pin:
-      name: "Boiler 2 PIN"
+      name: "Water heater 2 PIN"
     state:
-      name: "Boiler 2 state"
+      name: "Water heater 2 state"
     version:
-      name: "Boiler 2 version"
+      name: "Water heater 2 version"
     b_name:
-      name: "Boiler 2 name"
+      name: "Water heater 2 name"
     consumption:
-      name: "Boiler 2 energy"
+      name: "Water heater 2 energy"
 
 sensor:
   - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
     name: "WiFi Signal dB"
-    id: boiler_wifi_signal_db
+    id: water_heater_wifi_signal_db
     update_interval: 60s
     entity_category: "diagnostic"
 
   - platform: copy # Reports the WiFi signal strength in %
-    source_id: boiler_wifi_signal_db
+    source_id: water_heater_wifi_signal_db
     name: "WiFi Signal Percent"
     filters:
       - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
