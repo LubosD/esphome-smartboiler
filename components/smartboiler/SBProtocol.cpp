@@ -51,7 +51,7 @@ SBProtocolResult::SBProtocolResult(const uint8_t *value, uint16_t value_len) {
       this->mByteData.push_back(value[i + 4]);
       i++;
     }
-  } else if (cmd == SBPacket::SBC_PACKET_HOLIDAY_GET | cmd == SBPacket::SBC_PACKET_GLOBAL_FIRSTLOG |
+  } else if (cmd == SBPacket::SBC_PACKET_HOLIDAY_GET || cmd == SBPacket::SBC_PACKET_GLOBAL_FIRSTLOG ||
              cmd == SBPacket::SBC_PACKET_GLOBAL_NEXTLOG) {
     // two uint32 located at index 2 and 10
   } else {

@@ -104,7 +104,7 @@ uint8_t SmartBoiler::convert_action_to_mode(const std::string &payload) {
   else {
     ESP_LOGW(TAG, "Unknown water heater mode set: %s", payload.c_str());
   }
-  return mode;
+  return mode = 0;
 }
 
 void SmartBoiler::on_set_mode(const std::string &payload) {
@@ -175,6 +175,8 @@ void SmartBoiler::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
       handle_incoming(param->notify.value, param->notify.value_len);
       break;
     }
+    default:
+      break;
   }
 }
 
@@ -247,6 +249,8 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
               this->consumption_sensor_->publish_state((float) consumption / 1000);
             break;
           }
+          default:
+            break;
         }
       }
       break;
@@ -264,7 +268,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
         this->set_state(ConnectionState::CONNECTED);
         this->getInitData();
       } else {
-        ESP_LOGW(TAG, "Wrong PIN provided, water heater response: %s", result.mString);
+        ESP_LOGW(TAG, "Wrong PIN provided, water heater response: %s", result.mString.c_str());
       }
       break;
     }
@@ -285,14 +289,14 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
           break;
         }
       }
-      ESP_LOGW(TAG, "Bad FW info format: %s", result.mString);
+      ESP_LOGW(TAG, "Bad FW info format: %s", result.mString.c_str());
       break;
     }
 
     case SBPacket::SBC_PACKET_HOME_MODE: {
       auto modeOpt = parse_number<int>(result.mString);
       if (!modeOpt.has_value()) {
-        ESP_LOGW(TAG, "Bad mode string from water heater: %s", result.mString);
+        ESP_LOGW(TAG, "Bad mode string from water heater: %s", result.mString.c_str());
         break;
       }
       auto mode = modeOpt.value();
@@ -347,6 +351,8 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
       ESP_LOGW(TAG, "water heater indicates that the last request has failed");
       break;
     }
+    default:
+      break;
   }
 }
 

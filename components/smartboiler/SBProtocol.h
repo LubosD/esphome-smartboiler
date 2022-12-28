@@ -98,13 +98,13 @@ class SBProtocolRequest {
  public:
   SBProtocolRequest(SBPacket reqType) {
     this->mRqType = reqType;
-    this->write_le(u_int16_t(reqType));
-    this->write_le(u_int16_t(0));
+    this->write_le(uint16_t(reqType));
+    this->write_le(uint16_t(0));
   }
   SBProtocolRequest(SBPacket reqType, uint16_t uid) {
     this->mRqType = reqType;
     this->mUid = uid;
-    this->write_le(u_int16_t(reqType));
+    this->write_le(uint16_t(reqType));
     this->write_le(uid);
   }
 

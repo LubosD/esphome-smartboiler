@@ -54,7 +54,7 @@ class SmartBoiler : public PollingComponent,
 
  protected:
   void set_uid(const std::string &uid) { this->uid_ = uid; }
-  void on_set_temperature(u_int8_t temp);
+  void on_set_temperature(uint8_t temp);
   void on_set_mode(const std::string &payload);
   void on_set_hdo_enabled(const std::string &payload);
   void handle_incoming(const uint8_t *data, uint16_t length);
