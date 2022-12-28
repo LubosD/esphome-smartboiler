@@ -9,7 +9,6 @@ esp32:
 substitutions:
   mac_water_heater_1: XX:XX:XX:XX:XX:XX
   mac_water_heater_2: YY:YY:YY:YY:YY:YY
-  mqtt_broker: 192.168.1.100
 
 external_components:
   - source: 
@@ -20,8 +19,10 @@ external_components:
 logger:
   level: info
 
-mqtt:
-  broker: ${mqtt_broker}
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret ha_API_key
 
 ble_client:
   - mac_address: ${mac_water_heater_1}

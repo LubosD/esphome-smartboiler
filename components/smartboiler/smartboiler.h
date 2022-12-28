@@ -5,7 +5,6 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/ble_client/ble_client.h"
-#include "esphome/components/mqtt/custom_mqtt_device.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -31,8 +30,7 @@ struct SavedSmartBoilerSettings {
 } PACKED;
 
 class SmartBoiler : public PollingComponent,
-                    public esphome::ble_client::BLEClientNode,
-                    public esphome::mqtt::CustomMQTTDevice {
+                    public esphome::ble_client::BLEClientNode {
  public:
   void setup() override;
   void update() override;

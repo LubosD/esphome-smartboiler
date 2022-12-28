@@ -72,19 +72,20 @@ esp32:
 
 substitutions:
   mac_water_heater: XX:XX:XX:XX:XX:XX
-  mqtt_broker: 192.168.1.100
 
 external_components:
   - source: 
       type: git
-      url: https://github.com/pedobry/esphome-smartwater heater
-    components: [smartwater heater]
+      url: https://github.com/pedobry/esphome-smartboiler
+    components: [smartboiler]
 
 logger:
   level: info
 
-mqtt:
-  broker: ${mqtt_broker}
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret ha_API_key
 
 ble_client:
   - mac_address: ${mac_water_heater}
