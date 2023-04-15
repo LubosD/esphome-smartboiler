@@ -84,7 +84,7 @@ void SmartBoiler::on_set_temperature(uint8_t temp) {
 }
 
 uint8_t SmartBoiler::convert_action_to_mode(const std::string &payload) {
-  uint8_t mode;
+  uint8_t mode = 0;
   auto modeStr = str_upper_case(payload);
 
   if (modeStr == "STOP")
@@ -104,7 +104,7 @@ uint8_t SmartBoiler::convert_action_to_mode(const std::string &payload) {
   else {
     ESP_LOGW(TAG, "Unknown water heater mode set: %s", payload.c_str());
   }
-  return mode = 0;
+  return mode;
 }
 
 void SmartBoiler::on_set_mode(const std::string &payload) {
