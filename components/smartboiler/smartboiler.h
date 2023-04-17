@@ -19,6 +19,11 @@ namespace sb {
 static const uint8_t MIN_TEMP = 40;
 static const uint8_t MAX_TEMP = 80;
 
+static const std::string MODE_ANTIFREEZE = "ANTIFREEZE";
+static const std::string MODE_SMART = "SMART";
+static const std::string MODE_PROG = "PROG";
+static const std::string MODE_MANUAL = "MANUAL";
+
 class SmartBoilerModeSelect;
 class SmartBoilerThermostat;
 class SmartBoilerPinInput;
@@ -71,6 +76,7 @@ class SmartBoiler : public PollingComponent,
   std::string generateUUID();
   const char *state_to_string(ConnectionState state);
   uint8_t convert_action_to_mode(const std::string &payload);
+  std::string convert_mode_to_action(const uint8_t mode);
 
   ESPPreferenceObject pref_;
   // state of the connection
@@ -104,6 +110,10 @@ class SmartBoiler : public PollingComponent,
   friend class SmartBoilerModeSelect;
   friend class SmartBoilerThermostat;
   friend class SmartBoilerPinInput;
+
+private:
+  bool isHdoEnabled = false;
+  
 };
 
 class SmartBoilerModeSelect : public esphome::select::Select, public esphome::Parented<SmartBoiler> {
