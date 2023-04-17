@@ -157,4 +157,10 @@ esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x009000 nvs_zero
 
 It's possible to connect ESP to multiple water heaters simultaneously (up to three). See [example_multiple.yaml](example_multiple.yaml).
 
+**IMPORTANT:**
+
+when testing multiple water heaters (BLE clients) on ESPHome 2023.3.x, I have found it to be very unstable (keeps restarting frequently, disconnects, even up to the point it's not possible to finish OTA update). When you want to define multiple heaters on single ESP, I recommend to use older **ESPHome 2022.11.5** which I found somewhat stable.
+
+As a general rule, given the price of ESP32 devices, it's best to use dedicated ESP32 for each water heater.
+
 ![Home assistant](HA.png)
