@@ -16,8 +16,8 @@
 namespace esphome {
 namespace sb {
 
-static const uint8_t MIN_TEMP = 5;
-static const uint8_t MAX_TEMP = 74;
+static const uint8_t MIN_TEMP = 40;
+static const uint8_t MAX_TEMP = 80;
 
 class SmartBoilerModeSelect;
 class SmartBoilerThermostat;
