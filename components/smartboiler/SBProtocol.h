@@ -92,7 +92,17 @@ enum SBPacket : uint16_t {
   SBC_PACKET_STATISTICS_YEAR = 91,
 };
 
-static const char *modeStrings[] = {"STOP", "NORMAL", "HDO", "SMART", "SMARTHDO", "ANTIFROST", "NIGHT", "TEST"};
+enum Mode: uint8_t {
+  STOP = 0,
+  // MANUAL/HDO is selected based on HDO setting in water heater
+  MANUAL = 1,
+  HDO = 2,
+  // SMART/SMART_HDO is selected based on HDO setting in water heater
+  SMART = 3,
+  SMART_HDO = 4,
+  ANTIFREEZE = 5,
+  PROG = 6,
+};
 
 class SBProtocolRequest {
  public:

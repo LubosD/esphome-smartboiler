@@ -88,7 +88,7 @@ async def to_code(config):
         cg.add(var.set_heat_on(sens))
 
     if CONF_MODE in config:
-        sel = await select.new_select(config[CONF_MODE], options=['STOP', 'NORMAL', 'HDO', 'SMART', 'SMARTHDO', 'ANTIFROST', 'NIGHT', 'TEST'])
+        sel = await select.new_select(config[CONF_MODE], options=['ANTIFREEZE', 'SMART', 'PROG', 'MANUAL'])
         cg.add(var.set_mode(sel))
         await cg.register_parented(sel, var)
 

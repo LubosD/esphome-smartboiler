@@ -83,30 +83,6 @@ void SmartBoiler::on_set_temperature(uint8_t temp) {
   this->enqueue_command_(cmd);
 }
 
-uint8_t SmartBoiler::convert_action_to_mode(const std::string &payload) {
-  uint8_t mode = 0;
-  auto modeStr = str_upper_case(payload);
-
-  if (modeStr == "STOP")
-    mode = 0;
-  else if (modeStr == "NORMAL")
-    mode = 1;
-  else if (modeStr == "HDO")
-    mode = 2;
-  else if (modeStr == "SMART")
-    mode = 3;
-  else if (modeStr == "SMARTHDO")
-    mode = 4;
-  else if (modeStr == "ANTIFROST")
-    mode = 5;
-  else if (modeStr == "NIGHT")
-    mode = 6;
-  else {
-    ESP_LOGW(TAG, "Unknown water heater mode set: %s", payload.c_str());
-  }
-  return mode;
-}
-
 void SmartBoiler::on_set_mode(const std::string &payload) {
   auto mode = this->convert_action_to_mode(payload);
   auto cmd = SBProtocolRequest(SBC_PACKET_HOME_SETMODE, this->mPacketUid++);
@@ -300,9 +276,10 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
         break;
       }
       auto mode = modeOpt.value();
-      if (mode >= 0 && mode < sizeof(modeStrings) / sizeof(modeStrings[0])) {
+      auto modeAsString = convert_mode_to_action(mode);
+      if (!modeAsString.empty()) {
         if (mode_select_)
-          mode_select_->publish_state(modeStrings[mode]);
+          mode_select_->publish_state(modeAsString);
       } else
         ESP_LOGW(TAG, "Bad mode value from water heater: %d", mode);
       break;
@@ -340,7 +317,9 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
     }
     case SBPacket::SBC_PACKET_HDO_ONOFF: {
       auto hdoOpt = parse_number<int>(result.mString);
-      this->hdo_low_tariff_sensor_->publish_state(hdoOpt.value() == 1);
+      this->isHdoEnabled = hdoOpt.value() == 1;
+      this->hdo_low_tariff_sensor_->publish_state(this->isHdoEnabled);
+      ESP_LOGI(TAG, "Internal HDO decoder in %s.", this->isHdoEnabled ? "enabled" : "disabled");
       break;
     }
     case SBPacket::SBC_PACKET_HOME_BOILERNAME: {
@@ -356,14 +335,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
   }
 }
 
-void SmartBoilerModeSelect::control(const std::string &value) {
-  if (value.find("HDO") != std::string::npos)
-    get_parent()->on_set_hdo_enabled("1");
-  else
-    get_parent()->on_set_hdo_enabled("0");
-
-  get_parent()->on_set_mode(value);
-}
+void SmartBoilerModeSelect::control(const std::string &value) { get_parent()->on_set_mode(value); }
 
 void SmartBoilerThermostat::control(const esphome::climate::ClimateCall &call) {
   if (call.get_target_temperature().has_value()) {
@@ -476,6 +448,50 @@ void SmartBoilerPinInput::control(const float value) {
   } else {
     ESP_LOGW(TAG, "Device is not in pairing mode, PIN change is ignored.");
   }
+}
+
+/**
+ * Convert string value from HA to code used by water heaters.
+ * Modes SMART and MANUAL are converted to SMART_HDO/HDO in case
+ * the water heater is configured to use HDO internal decoder.
+ */
+uint8_t SmartBoiler::convert_action_to_mode(const std::string &payload) {
+  uint8_t mode = Mode::STOP;
+  auto modeStr = str_upper_case(payload);
+
+  if (modeStr == MODE_ANTIFREEZE)
+    mode = Mode::ANTIFREEZE;
+  else if (modeStr == MODE_SMART)
+    mode = this->isHdoEnabled ? Mode::SMART_HDO : Mode::SMART;
+  else if (modeStr == MODE_PROG)
+    mode = Mode::PROG;
+  else if (modeStr == MODE_MANUAL)
+    mode = this->isHdoEnabled ? Mode::HDO : Mode::MANUAL;
+  else {
+    ESP_LOGW(TAG, "Unknown water heater mode: %s", payload.c_str());
+  }
+  return mode;
+}
+
+std::string SmartBoiler::convert_mode_to_action(const uint8_t mode) {
+  switch (mode) {
+    case Mode::ANTIFREEZE:
+      return MODE_ANTIFREEZE;
+    case Mode::SMART:
+      return MODE_SMART;
+    case Mode::SMART_HDO:
+      return MODE_SMART;
+    case Mode::PROG:
+      return MODE_PROG;
+    case Mode::MANUAL:
+      return MODE_MANUAL;
+    case Mode::HDO:
+      return MODE_MANUAL;
+    default:
+      ESP_LOGW(TAG, "Unknown water heater mode: %d", mode);
+      break;
+  }
+  return MODE_ANTIFREEZE;
 }
 
 }  // namespace sb
