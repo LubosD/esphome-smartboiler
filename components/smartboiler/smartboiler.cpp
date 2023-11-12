@@ -205,13 +205,13 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
       // all setting commands are sent with unique packet UID and confirmation from BT
       // server is expected. Most of them contain no additional data, with exception of
       // SBC_PACKET_STATISTICS_GETALL
-      ESP_LOGD(TAG, "Received confirmation for packet with UID: %02X", result.mUid);
+      ESP_LOGD(TAG, "Received confirmation for packet with UID: %0X", result.mUid);
       ESP_LOGD(TAG, "mByteData: DATA=[%s]", format_hex_pretty(result.mByteData).c_str());
 
       // find original request in queue of sent packets
       auto originalRequest = std::find_if(this->sent_queue_.begin(), this->sent_queue_.end(),
-                                          [&](const SBProtocolRequest &req) { return req.mUid == result.mUid; });
-      if (originalRequest != std::end(this->sent_queue_)) {
+                                          [&](const SBProtocolRequest& req) { return req.mUid == result.mUid; });
+      if (originalRequest != this->sent_queue_.end()) {
         ESP_LOGD(TAG, "original request was: %d", (*originalRequest).mRqType);
         // remove the sent request from the queue as it was sucessfully accepted
         this->sent_queue_.erase(originalRequest);
@@ -319,7 +319,7 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
       auto hdoOpt = parse_number<int>(result.mString);
       this->isHdoEnabled = hdoOpt.value() == 1;
       this->hdo_low_tariff_sensor_->publish_state(this->isHdoEnabled);
-      ESP_LOGI(TAG, "Internal HDO decoder in %s.", this->isHdoEnabled ? "enabled" : "disabled");
+      ESP_LOGI(TAG, "Internal HDO decoder is %s.", this->isHdoEnabled ? "enabled" : "disabled");
       break;
     }
     case SBPacket::SBC_PACKET_HOME_BOILERNAME: {
@@ -328,6 +328,17 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
     }
     case SBPacket::SBC_PACKET_HOME_ERROR: {
       ESP_LOGW(TAG, "water heater indicates that the last request has failed");
+      break;
+    }
+    case SBPacket::SBC_PACKET_HOME_TIME: {
+      // time is in format D.HH:MM:SS
+      // first byte is day
+      auto day = result.mString[0] - '0';
+      // the rest is a string
+      auto time = result.mString.substr(2,8);
+      char buffer[30];
+      sprintf(buffer, "%s, %s", this->day_to_string(day), time.c_str());
+      ESP_LOGD(TAG, "Water heater internal time: %s", buffer);
       break;
     }
     default:
@@ -431,6 +442,27 @@ const char *SmartBoiler::state_to_string(ConnectionState state) {
       return "Authenticating";
     case ConnectionState::DISCONNECTED:
       return "Disconnected";
+    default:
+      return "Unknown";
+  }
+}
+
+const char *SmartBoiler::day_to_string(uint8_t day) {
+  switch (day) {
+    case 0:
+      return "Monday";
+    case 1:
+      return "Tuesday";
+    case 2:
+      return "Wednesday";
+    case 3:
+      return "Thursday";
+    case 4:
+      return "Friday";
+    case 5:
+      return "Saturday";
+    case 6:
+      return "Sunday";
     default:
       return "Unknown";
   }
