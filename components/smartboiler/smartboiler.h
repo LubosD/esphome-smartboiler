@@ -75,6 +75,7 @@ class SmartBoiler : public PollingComponent,
   void set_state(ConnectionState newState);
   std::string generateUUID();
   const char *state_to_string(ConnectionState state);
+  const char *day_to_string(uint8_t day);
   uint8_t convert_action_to_mode(const std::string &payload);
   std::string convert_mode_to_action(const uint8_t mode);
 

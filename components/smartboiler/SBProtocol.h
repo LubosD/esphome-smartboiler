@@ -121,6 +121,7 @@ class SBProtocolRequest {
   void write_le(uint8_t s);
   void write_le(uint16_t s);
   void write_le(uint32_t s);
+  void write_le(uint64_t s);
   void writeString(const std::string &s);
 
   std::vector<uint8_t> mData;
@@ -134,7 +135,9 @@ class SBProtocolResult {
   SBPacket mRqType;
   uint16_t mUid = 0;
   std::vector<uint8_t> mByteData;
+  const uint8_t* mRawData;
   std::string mString;
+  uint16_t load_uint16_le(size_t position);
   uint32_t load_uint32_le(size_t position);
 };
 

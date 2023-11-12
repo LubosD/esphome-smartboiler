@@ -35,10 +35,18 @@ uint32_t SBProtocolResult::load_uint32_le(size_t position) {
   return number;
 }
 
+uint16_t SBProtocolResult::load_uint16_le(size_t position) {
+  uint16_t number;
+  number = this->mRawData[position];
+  number |= uint32_t(this->mRawData[position + 1]) << 8;
+  return number;
+}
+
 SBProtocolResult::SBProtocolResult(const uint8_t *value, uint16_t value_len) {
   // First two bytes contain a decimal value from SbcPacket as a string
   SBPacket cmd = static_cast<SBPacket>((value[0] - '0') * 10 + (value[1] - '0'));
   this->mRqType = cmd;
+  this->mRawData = value;
   int i = 0;
   if (cmd == SBPacket::SBC_PACKET_NIGHT_GETDAYS) {
     // copy next 12 bytes
@@ -46,7 +54,7 @@ SBProtocolResult::SBProtocolResult(const uint8_t *value, uint16_t value_len) {
     // copy next 9 bytes
   } else if (cmd == SBPacket::SBC_PACKET_GLOBAL_CONFIRMUID) {
     // confirmation packet includes UID of original request
-    this->mUid = uint16_t(value[2]);
+    this->mUid = this->load_uint16_le(2);
     while (i < 16) {
       this->mByteData.push_back(value[i + 4]);
       i++;
