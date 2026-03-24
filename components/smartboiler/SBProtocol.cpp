@@ -20,6 +20,18 @@ void SBProtocolRequest::write_le(uint32_t s) {
   this->mData.push_back((uint8_t) ((s >> 24) & 255));
 }
 
+// write value in Little Endian
+void SBProtocolRequest::write_le(uint64_t s) {
+  this->mData.push_back((uint8_t) (s & 255));
+  this->mData.push_back((uint8_t) ((s >> 8) & 255));
+  this->mData.push_back((uint8_t) ((s >> 16) & 255));
+  this->mData.push_back((uint8_t) ((s >> 24) & 255));
+  this->mData.push_back((uint8_t) ((s >> 32) & 255));
+  this->mData.push_back((uint8_t) ((s >> 40) & 255));
+  this->mData.push_back((uint8_t) ((s >> 48) & 255));
+  this->mData.push_back((uint8_t) ((s >> 56) & 255));
+}
+
 void SBProtocolRequest::writeString(const std::string &s) {
   for (size_t i = 0; i < s.size(); i++) {
     this->mData.push_back(s[i]);

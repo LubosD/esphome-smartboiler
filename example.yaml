@@ -4,7 +4,8 @@ esphome:
 esp32:
   board: nodemcu-32s
   framework:
-    type: arduino
+    type: esp-idf
+    version: recommended
 
 substitutions:
   mac_water_heater: XX:XX:XX:XX:XX:XX
@@ -14,6 +15,11 @@ external_components:
       type: git
       url: https://github.com/pedobry/esphome-smartboiler
     components: [smartboiler]
+
+# Enable time component. This will be used to set the time on the water heater.
+time:
+  - platform: homeassistant
+    id: esphome_time
 
 # Enable Home Assistant API
 api:
@@ -26,6 +32,7 @@ ble_client:
 
 smartboiler:
   - ble_client_id: drazice_okhe
+    time_id: esphome_time
     temp1:
       name: "Water heater temp1"
     temp2:
