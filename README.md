@@ -101,7 +101,7 @@ When ESPHome finds an old configuration, it shows a warning with a link to this 
 * `smartboiler:` is no longer a list - remove the leading `- ` and fix the indentation. A list with one item still works (with a warning), more water heaters on one ESP are not supported anymore.
 * `ble_client_id` and `time_id` can be omitted when there is only one BLE client / time source.
 * The monitoring switch is created by the component - remove the `switch:` with `platform: ble_client` (otherwise there would be two switches doing the same).
-* Entity names are now optional. To keep the existing pairing, **first flash the new version with your existing entity names** - the pairing UID is then migrated to a new storage key, which does not depend on entity names. After that you can remove the names. If you change the thermostat name before this migration, the water heater has to be paired again.
+* Entity names are now optional, you can remove them right away. The pairing is kept - the stored pairing UID is found and migrated automatically on the first start of the new version (if the ESP was used for more water heaters before, the UID cannot be chosen and the water heater has to be paired again).
 
 ## Pairing process
 

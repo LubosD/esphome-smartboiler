@@ -9,7 +9,7 @@ Your YAML needs to be updated - see [Upgrading from older versions](README.md#up
 * `smartboiler:` is a single mapping instead of a list. A list with one item is still accepted (with a warning), only one water heater per ESP is supported.
 * The *Monitoring* switch is created by the component, remove the `switch:` with `platform: ble_client`.
 * All entities are created automatically with default names. Entity names in YAML are optional.
-* The pairing UID is stored under a key derived from the water heater MAC address. It is migrated automatically when the new version is flashed with the existing entity names for the first time.
+* The pairing UID is stored under a key derived from the water heater MAC address and no longer depends on entity names. The UID stored by older versions is found and migrated automatically on the first start.
 
 ### New entities
 

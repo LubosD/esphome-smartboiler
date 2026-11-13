@@ -10,6 +10,10 @@
 #include "esphome/components/time/real_time_clock.h"
 #endif
 
+#include <esp_idf_version.h>
+#include <nvs.h>
+#include <nvs_flash.h>
+
 #define UUID_LENGTH 6
 
 static const char *const TAG = "smartboiler";
@@ -28,20 +32,95 @@ static const uint16_t CLIENT_CHARACTERISTIC_CONFIG_DESCRIPTOR_UUID = 0x2902;
 
 static const int COMMAND_DELAY = 100;
 
+static bool is_valid_uid(const char *uid, size_t len) {
+  if (len != UUID_LENGTH)
+    return false;
+  for (size_t i = 0; i < len; i++) {
+    if (!((uid[i] >= '0' && uid[i] <= '9') || (uid[i] >= 'A' && uid[i] <= 'F')))
+      return false;
+  }
+  return true;
+}
+
+/**
+ * Migration from older versions, which stored the UID under the thermostat object id hash.
+ * The thermostat name may have changed since then, so search ESPHome preferences in NVS
+ * for a value which looks like a UID (6 hex characters). Used only if exactly one is found,
+ * older versions supported more water heaters per ESP and the UIDs could not be told apart.
+ */
+static bool find_legacy_uid(uint32_t skip_key, SavedSmartBoilerSettings *out) {
+  nvs_handle_t handle;
+  if (nvs_open("esphome", NVS_READONLY, &handle) != ESP_OK)
+    return false;
+
+  char skip_key_str[12];
+  snprintf(skip_key_str, sizeof(skip_key_str), "%" PRIu32, skip_key);
+  int found = 0;
+  SavedSmartBoilerSettings candidate{};
+
+  auto check_entry = [&](const nvs_entry_info_t &info) {
+    if (strcmp(info.key, skip_key_str) == 0)
+      return;
+    size_t len = 0;
+    if (nvs_get_blob(handle, info.key, nullptr, &len) != ESP_OK || len != sizeof(SavedSmartBoilerSettings))
+      return;
+    SavedSmartBoilerSettings value{};
+    if (nvs_get_blob(handle, info.key, &value, &len) != ESP_OK || !is_valid_uid(value.uid, len))
+      return;
+    ESP_LOGD(TAG, "Found stored UID candidate under NVS key %s", info.key);
+    candidate = value;
+    found++;
+  };
+
+#if ESP_IDF_VERSION_MAJOR >= 5
+  nvs_iterator_t it = nullptr;
+  esp_err_t err = nvs_entry_find(NVS_DEFAULT_PART_NAME, "esphome", NVS_TYPE_BLOB, &it);
+  while (err == ESP_OK) {
+    nvs_entry_info_t info;
+    nvs_entry_info(it, &info);
+    check_entry(info);
+    err = nvs_entry_next(&it);
+  }
+  nvs_release_iterator(it);
+#else
+  nvs_iterator_t it = nvs_entry_find(NVS_DEFAULT_PART_NAME, "esphome", NVS_TYPE_BLOB);
+  while (it != nullptr) {
+    nvs_entry_info_t info;
+    nvs_entry_info(it, &info);
+    check_entry(info);
+    it = nvs_entry_next(it);
+  }
+#endif
+  nvs_close(handle);
+
+  if (found > 1) {
+    ESP_LOGW(TAG, "Found %d stored UIDs from an older version, cannot choose one - pairing is required", found);
+    return false;
+  }
+  if (found == 1)
+    *out = candidate;
+  return found == 1;
+}
+
 void SmartBoiler::restore_state_() {
   SavedSmartBoilerSettings recovered{};
   // UID is stored under a key derived from the water heater MAC address, so it does not depend on entity names
   uint32_t key = fnv1_hash(std::string("smartboiler_") + this->parent_->address_str());
   this->pref_ = global_preferences->make_preference<SavedSmartBoilerSettings>(key);
   bool restored = this->pref_.load(&recovered);
+  bool migrated = false;
   if (!restored && this->thermostat_ != nullptr) {
     // migration: older versions stored UID under the thermostat object id hash
     auto legacy = global_preferences->make_preference<SavedSmartBoilerSettings>(this->thermostat_->get_object_id_hash());
-    restored = legacy.load(&recovered);
-    if (restored) {
-      ESP_LOGI(TAG, "Migrating stored UID to the new storage key");
-      this->pref_.save(&recovered);
-    }
+    restored = migrated = legacy.load(&recovered);
+  }
+  if (!restored) {
+    // migration: thermostat name has changed, search by content
+    restored = migrated = find_legacy_uid(key, &recovered);
+  }
+  if (migrated) {
+    ESP_LOGI(TAG, "Migrating stored UID from an older version to the new storage key");
+    this->pref_.save(&recovered);
   }
   if (restored) {
     this->uid_ = std::string(recovered.uid, strnlen(recovered.uid, sizeof(recovered.uid)));
