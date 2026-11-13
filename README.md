@@ -19,6 +19,8 @@ This component has been tested on:
 
 This ESPHome component uses standard ESPHome entities (sensors, switches, etc.), which are discovered automatically by Home Assistant through the native ESPHome API (`api:`).
 
+![Water heater in Home Assistant](home-assistant.png)
+
 ### Entities
 
 All entities are created automatically with the default names below. In Home Assistant they are shown under the ESPHome device, prefixed with its name (set `friendly_name` in the `esphome:` section, e.g. `Water heater` → `Water heater Upper temperature`).
@@ -65,7 +67,34 @@ smartboiler:
 
 Switches and numbers show the state reported by the water heater. After a change, the value is re-read from the water heater, so a rejected change is reverted in Home Assistant.
 
-To schedule a holiday, set *Holiday starts in* first and then *Holiday length* (setting the length sends both values to the water heater). The water heater switches to HOLIDAY mode for this period.
+### Holiday
+
+During a holiday the water heater only protects the water from freezing (mode `HOLIDAY`, same as ANTIFREEZE) and doesn't heat water you won't use. The holiday is set by two numbers, both counted in days **relative to today**:
+
+| Entity | Meaning |
+| --- | --- |
+| *Holiday starts in* | Days until the first day of the holiday: `0` = today, `1` = tomorrow, ... |
+| *Holiday length* | Number of holiday days including the first and the last day. `0` = no holiday |
+
+The holiday covers the days from *today + Holiday starts in* to *today + Holiday starts in + Holiday length − 1*.
+
+**Planning a holiday**
+
+1. Set *Holiday starts in*. While *Holiday length* is `0`, the value is only remembered by the ESP and nothing is sent to the water heater yet.
+2. Set *Holiday length*. Now both values are sent to the water heater and read back, so Home Assistant shows what the water heater really accepted.
+
+Example: today is Monday and you will be away from Saturday to the next Sunday (9 days). Set *Holiday starts in* to `5` and *Holiday length* to `9`.
+
+**Changing or cancelling a holiday**
+
+* Changing either number of a planned holiday sends the new values to the water heater immediately.
+* Setting *Holiday length* to `0` cancels the holiday.
+
+Notes:
+
+* The water heater counts the days down by itself (based on its internal clock), so *Holiday starts in* decreases every day. Keep the clock in sync by configuring a `time:` source.
+* The values are also shown and can be changed in the original mobile app (*Vacation*).
+* The *Mode* select shows `HOLIDAY` while the holiday is active. It cannot be selected manually.
 
 ### Modes
 
@@ -185,5 +214,3 @@ ESPHome NVM can be reset by:
 dd if=/dev/zero of=nvs_zero bs=1 count=20480
 esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x009000 nvs_zero
 ```
-
-![Home Assistant](HA.png)
