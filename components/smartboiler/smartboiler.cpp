@@ -30,12 +30,19 @@ static const int COMMAND_DELAY = 100;
 
 void SmartBoiler::restore_state_() {
   SavedSmartBoilerSettings recovered{};
-  // Thermostat hash is kept as the key for backward compatibility (stored UID survives the upgrade).
-  uint32_t key = this->thermostat_ != nullptr
-                     ? this->thermostat_->get_object_id_hash()
-                     : fnv1_hash(std::string("smartboiler_") + this->parent_->address_str());
+  // UID is stored under a key derived from the water heater MAC address, so it does not depend on entity names
+  uint32_t key = fnv1_hash(std::string("smartboiler_") + this->parent_->address_str());
   this->pref_ = global_preferences->make_preference<SavedSmartBoilerSettings>(key);
   bool restored = this->pref_.load(&recovered);
+  if (!restored && this->thermostat_ != nullptr) {
+    // migration: older versions stored UID under the thermostat object id hash
+    auto legacy = global_preferences->make_preference<SavedSmartBoilerSettings>(this->thermostat_->get_object_id_hash());
+    restored = legacy.load(&recovered);
+    if (restored) {
+      ESP_LOGI(TAG, "Migrating stored UID to the new storage key");
+      this->pref_.save(&recovered);
+    }
+  }
   if (restored) {
     this->uid_ = std::string(recovered.uid, strnlen(recovered.uid, sizeof(recovered.uid)));
     ESP_LOGD(TAG, "using stored UID: %s", this->uid_.c_str());

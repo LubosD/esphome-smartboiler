@@ -2,7 +2,7 @@
 
 This ESPHome component connects to Dražice OKHE smart water heaters via Bluetooth Low Energy, collects data, and also allows for limited remote control.
 
-You will need an ESP32 module and an MQTT server. You also need to determine the MAC address of your water heater. See an [example configuration](example.yaml).
+You will need an ESP32 module and Home Assistant with the ESPHome integration. You also need to determine the MAC address of your water heater. See an [example configuration](example.yaml).
 
 Note that only one device can be connected to the water heater at a time.
 
@@ -14,49 +14,54 @@ This component has been tested on:
 
 ## Documentation
 
-This ESPHome component uses several standard components (sensors, etc.) for easy Home Assistant integration (auto-discovery). While it uses MQTT, it's also possible to remove MQTT and set up HA integration directly via the `api:` option.
+This ESPHome component uses standard ESPHome entities (sensors, switches, etc.), which are discovered automatically by Home Assistant through the native ESPHome API (`api:`).
 
-### Water heater outputs
+### Entities
 
-| Binary sensors | Config key | |
-| --- | --- | --- |
-| HDO | `hdo_low_tariff` | On if the internal HDO decoder is enabled in the water heater (not the current tariff, see `low_tariff`) |
-| Heat | `heat_on` | On when the water heater is currently heating (consuming energy) |
-| Low tariff | `low_tariff` | On when the low (cheaper) tariff is available now. Polled every 60 s |
-| Problem | `problem` | On when the water heater reports any error |
+All entities are created automatically with the default names below. In Home Assistant they are shown under the ESPHome device, prefixed with its name (set `friendly_name` in the `esphome:` section, e.g. `Water heater` → `Water heater Upper temperature`).
 
-| Sensors | Config key | |
-| --- | --- | --- |
-| Temp1 | `temp1` | Temperature detected by lower temperature sensor |
-| Temp2 | `temp2` | Temperature detected by upper temperature sensor (this is the temperature displayed on the water heater) |
-| Energy | `consumption` | Energy consumed since last reset (in kWh) |
-| Anode voltage | `anode_voltage` | Voltage of the protective anode |
-| Capacity | `capacity` | Configured volume of the water heater (l) |
-| PROG temperature | `prog_temperature` | Target temperature currently used by the PROG (night) program |
+| Default name | Config key | Type | Description |
+| --- | --- | --- | --- |
+| Thermostat | `thermostat` | climate | Target temperature for MANUAL/HDO mode (40–80 °C), current (upper) temperature and heating action |
+| Mode | `mode` | select | Operating mode, see below |
+| Lower temperature | `temp1` | sensor | Temperature detected by the lower temperature sensor |
+| Upper temperature | `temp2` | sensor | Temperature detected by the upper temperature sensor (displayed on the water heater) |
+| Heating | `heat_on` | binary sensor | On when the water heater is currently heating (consuming energy) |
+| Energy | `consumption` | sensor | Energy consumed since the last reset (kWh) |
+| Reset energy | `reset_energy` | button | Resets the energy counter in the water heater |
+| Low tariff | `low_tariff` | binary sensor | On when the low (cheaper) tariff is available now, polled every 60 s |
+| HDO decoder | `hdo` | switch | Enables/disables the internal HDO (ripple control) decoder |
+| HDO | `hdo_low_tariff` | binary sensor | Same as the HDO decoder switch, kept for compatibility (disabled by default) |
+| PROG temperature | `prog_temperature` | sensor | Target temperature currently used by the PROG (night) program |
+| PROG low / high temperature | `prog_temp_low`, `prog_temp_high` | number | Temperatures used by the PROG program, 10–80 °C, low must be lower than high |
+| Holiday starts in | `holiday_start` | number | Days until the holiday starts (0 = today) |
+| Holiday length | `holiday_length` | number | Holiday length in days, `0` cancels the holiday |
+| Anti-legionella | `antilegionella` | switch | Periodic anti-legionella heating (water heater FW 1.6 or newer) |
+| Problem | `problem` | binary sensor | On when the water heater reports any error |
+| Error | `error` | text sensor | `OK` or list of active errors (codes Er01–Er09 as in the original app) |
+| Pairing PIN | `pin` | number | PIN for pairing, see below |
+| State | `state` | text sensor | Connection state: Disconnected / Authenticating / Require PIN / Connected |
+| Anode Voltage | `anode_voltage` | sensor | Voltage of the protective anode |
+| Name | `b_name` | text sensor | Name of the water heater |
+| Model | `model` | text sensor | Model of the water heater |
+| Version | `version` | text sensor | Firmware version, board version and serial number |
+| Capacity | `capacity` | sensor | Configured volume of the water heater (l) |
 
-| Text sensors | Config key | |
-| --- | --- | --- |
-| Version | `version` | Firmware version, board version, and serial number |
-| State | `state` | Connection state: Disconnected / Authenticating / Require PIN / Connected |
-| Name | `b_name` | Name of the water heater unit |
-| Model | `model` | Model of the water heater |
-| Error | `error` | `OK` or list of active errors (same codes Er01–Er09 as the original app) |
+Any entity can be customized using its config key with standard ESPHome entity options:
 
-| Inputs | Config key | |
-| --- | --- | --- |
-| Thermostat | `thermostat` | Target temperature for MANUAL/HDO mode (40–80 °C), current temperature and heating action |
-| Mode | `mode` | Operating mode, see below |
-| Pairing PIN | `pin` | Input to set pairing PIN |
-| HDO decoder | `hdo` | Switch to enable/disable the internal HDO (ripple control) decoder |
-| Anti-legionella | `antilegionella` | Switch for periodic anti-legionella heating (water heater FW 1.6 or newer) |
-| PROG low / high temperature | `prog_temp_low`, `prog_temp_high` | Temperatures used by the PROG (night) program, 10–80 °C, low must be lower than high |
-| Holiday starts in | `holiday_start` | Number of days until the holiday starts (0 = today) |
-| Holiday length | `holiday_length` | Holiday length in days, `0` cancels the holiday. The water heater switches to HOLIDAY mode for this period |
-| Reset energy | `reset_energy` | Button to reset the energy counter in the water heater |
+```yaml
+smartboiler:
+  temp2:
+    name: "Water temperature"   # rename
+  model:
+    internal: true              # don't expose to Home Assistant
+  anode_voltage:
+    disabled_by_default: true   # create in Home Assistant, but disabled
+```
 
-All new entities are optional - add only those you want to see in Home Assistant. Switches and numbers show the state reported by the water heater; after a change, the value is re-read from the water heater, so a rejected change is reverted in Home Assistant.
+Switches and numbers show the state reported by the water heater. After a change, the value is re-read from the water heater, so a rejected change is reverted in Home Assistant.
 
-To schedule a holiday, set `holiday_start` first and then `holiday_length` (setting the length sends both values to the water heater).
+To schedule a holiday, set *Holiday starts in* first and then *Holiday length* (setting the length sends both values to the water heater). The water heater switches to HOLIDAY mode for this period.
 
 ### Modes
 
@@ -75,6 +80,12 @@ This is the list of recognized mode values. See the [original app](https://play.
 The thermostat entity shows `off` when the water heater is in STOP mode and `heat` otherwise. Its mode cannot be changed; use the mode select instead.
 
 
+## Upgrading from older versions
+
+* `smartboiler:` is no longer a list - remove the leading `- ` and fix the indentation.
+* `ble_client_id` and `time_id` can be omitted when there is only one BLE client / time source.
+* Entity names are now optional. To keep the existing pairing, **first flash the new version with your existing entity names** - the pairing UID is then migrated to a new storage key, which does not depend on entity names. After that you can remove the names. If you change the thermostat name before this migration, the water heater has to be paired again.
+
 ## Pairing process
 
 The water heater requires the client to be "authenticated" in order to communicate. The client generates a random UUID, sends it to the water heater, and the water heater responds with a request for pairing and shows a PIN on the display.
@@ -83,82 +94,53 @@ This component allows you to set the pairing PIN and complete the pairing proces
 
 ### 1. Configure ESP device
 
-Create a configuration for ESP (see [example](example.yaml) for details). The component allows you to define multiple water heaters to connect to (max 3). You need to know the water heater's Bluetooth MAC address (use any BT scanner to listen for BLE announcements. Please note that the water heater sends announcements only when no device is connected).
+Create a configuration for ESP (see [example](example.yaml) for details). You need to know the water heater's Bluetooth MAC address (use any BT scanner to listen for BLE announcements. Please note that the water heater sends announcements only when no device is connected).
 
 ```yaml
 esphome:
-  name: "test-node"
+  name: water-heater
+  friendly_name: Water heater
 
 esp32:
   board: nodemcu-32s
   framework:
     type: esp-idf
-    version: recommended
-
-substitutions:
-  mac_water_heater: XX:XX:XX:XX:XX:XX
-
-# Enable time component. This will be used to set the time on the water heater.
-time:
-  - platform: homeassistant
-    id: esphome_time
 
 external_components:
-  - source: 
+  - source:
       type: git
       url: https://github.com/pedobry/esphome-smartboiler
     components: [smartboiler]
 
 logger:
-  level: info
 
 # Enable Home Assistant API
 api:
   encryption:
     key: !secret ha_API_key
 
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# Optional: used to keep the water heater clock in sync (used automatically when present)
+time:
+  - platform: homeassistant
+
 ble_client:
-  - mac_address: ${mac_water_heater}
-    id: drazice_okhe
+  - mac_address: XX:XX:XX:XX:XX:XX
+    id: water_heater
 
 smartboiler:
-  - ble_client_id: drazice_okhe
-    time_id: esphome_time
-    temp1:
-      name: "Water heater temp1"
-    temp2:
-      name: "Water heater temp2"
-    mode:
-      name: "Water heater mode"
-    thermostat:
-      name: "Water heater thermostat"
-    heat_on:
-      name: "Water heater heat"
-    hdo_low_tariff:
-      name: "Water heater HDO"
-    pin:
-      name: "Water heater PIN"
-    state:
-      name: "Water heater state"
-    version:
-      name: "Water heater version"
-    b_name:
-      name: "Water heater name"
-    consumption:
-      name: "Water heater energy"
 
 switch:
   - platform: ble_client
-    ble_client_id: drazice_okhe
-    name: "Enable water heater monitoring"
-
-ota:
-  password: !secret ota_password
-
-wifi:
-  ssid: !secret wifi1_ssid
-  password: !secret wifi1_psk
-
+    ble_client_id: water_heater
+    name: "Monitoring"
 ```
 
 I strongly recommend adding a switch to enable/disable the monitoring. The water heater allows only one device to connect at a time, and you might need to disconnect the monitoring when you want to use the mobile application for some complex settings or firmware upgrades.
@@ -178,7 +160,7 @@ The ESP32 stores the UUID in NVM and pairing is persistent between restarts.
 ### Setting time on water heater
 The water heater has internal clock which measure date-less time (only day of the week and hours, minutes and seconds). This is used for scheduling of water heater stated or temperatures (available only in original app). For that, it's necessary that water heater has proper time set up. Unfortunately, the time is lost after power outage and needs to be set up again.
 
-Add a `time:` source (for example `platform: homeassistant`) and set `time_id` on each `smartboiler` entry to the same `id` as that clock. The firmware then compares the heater clock to ESPHome and adjusts if it differs by more than 30 seconds, keeping the heater aligned with Home Assistant.
+Add a `time:` source (for example `platform: homeassistant`). It is used automatically; if you have more than one time source, select it with `time_id`. The firmware then compares the heater clock to ESPHome and adjusts if it differs by more than 30 seconds, keeping the heater aligned with Home Assistant.
 
 ### How to reset UUID
 
@@ -188,15 +170,5 @@ ESPHome NVM can be reset by:
 dd if=/dev/zero of=nvs_zero bs=1 count=20480
 esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x009000 nvs_zero
 ```
-
-## Multiple water heaters on the same ESP32
-
-It's possible to connect an ESP to multiple water heaters simultaneously (up to three). See [example_multiple.yaml](example_multiple.yaml).
-
-**IMPORTANT:**
-
-When testing multiple water heaters (BLE clients) on ESPHome 2023.3.x, I have found it to be very unstable (keeps restarting frequently, disconnects, even up to the point where it's not possible to finish OTA updates). When you want to define multiple heaters on a single ESP, I recommend using the older **ESPHome 2022.11.5** which I found somewhat stable.
-
-As a general rule, given the price of ESP32 devices, it's best to use a dedicated ESP32 for each water heater.
 
 ![Home Assistant](HA.png)

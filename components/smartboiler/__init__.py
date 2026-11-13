@@ -7,7 +7,7 @@ from esphome.components import (
     switch, button,
 )
 from esphome.const import (
-    CONF_ID,CONF_STATE, CONF_PIN,
+    CONF_ID, CONF_NAME, CONF_STATE, CONF_PIN,
     CONF_VERSION, UNIT_CELSIUS,
     ICON_THERMOMETER, ICON_FLASH,
     ENTITY_CATEGORY_DIAGNOSTIC,
@@ -26,7 +26,6 @@ from esphome.const import (
 
 AUTO_LOAD = ["sensor", "binary_sensor", "select", "climate", "esp32_ble_tracker", "number", "text_sensor",
              "switch", "button"]
-MULTI_CONF = 3
 
 CONF_TEMP1 = 'temp1'
 CONF_TEMP2 = 'temp2'
@@ -84,74 +83,116 @@ NUMBERS = {
     CONF_HOLIDAY_LENGTH: (NumberType.HOLIDAY_LENGTH, 'set_holiday_length_number', 0, HOLIDAY_MAX_DAYS),
 }
 
-CONFIG_SCHEMA = cv.polling_component_schema('600s').extend({
+class _Entity(cv.Optional):
+    """Optional entity which is created automatically with a default name.
+
+    Options set by the user are merged with the defaults, so the entity can be renamed
+    (`name`), hidden from Home Assistant (`internal: true`) or disabled by default
+    (`disabled_by_default: true`) without repeating the other options.
+    """
+
+    def __init__(self, key, name, **defaults):
+        super().__init__(key, default={})
+        self.entity_defaults = {CONF_NAME: name, **defaults}
+
+
+def _with_defaults(schema, defaults):
+    def validator(value):
+        merged = dict(defaults)
+        merged.update(value or {})
+        return schema(merged)
+
+    return validator
+
+
+def _apply_entity_defaults(schema):
+    return {
+        key: _with_defaults(value, key.entity_defaults) if isinstance(key, _Entity) else value
+        for key, value in schema.items()
+    }
+
+
+CONFIG_SCHEMA = cv.polling_component_schema('600s').extend(_apply_entity_defaults({
     cv.GenerateID(): cv.declare_id(SmartBoiler),
-    cv.Optional(CONF_TEMP1): sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, icon=ICON_THERMOMETER, accuracy_decimals=1).extend(),
-    cv.Optional(CONF_TEMP2): sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, icon=ICON_THERMOMETER, accuracy_decimals=1).extend(),
-    cv.Optional(CONF_HDO_LOW_TARIFF, {"name": "HDO"}): binary_sensor.binary_sensor_schema().extend(),
-    cv.Optional(CONF_HEAT_ON, {"name":"Heating", "icon": "mdi:radiator"}): binary_sensor.binary_sensor_schema().extend(),
-    cv.Optional(CONF_MODE): select.select_schema(select.Select).extend({
-        cv.GenerateID(): cv.declare_id(SmartBoilerModeSelect),
-    }),
-    cv.Optional(CONF_THERMOSTAT): climate.climate_schema(climate.Climate).extend({
-        cv.GenerateID(): cv.declare_id(SmartBoilerThermostat),
-    }),
-    cv.Optional(CONF_PIN, {"name": "Pairing PIN", "mode": "BOX", "icon": "mdi:lock"}): number.number_schema(number.Number).extend({
-        cv.GenerateID(): cv.declare_id(SmartBoilerPinInput),
-    }),
-    cv.Optional(CONF_STATE, {"name": "State", "icon": "mdi:connection" }): text_sensor.text_sensor_schema().extend(),
-    cv.Optional(CONF_VERSION, {"name": "Version", "entity_category": ENTITY_CATEGORY_DIAGNOSTIC }): text_sensor.text_sensor_schema().extend(),
-    cv.Optional(CONF_BNAME, {"name": "Name" }): text_sensor.text_sensor_schema().extend(),
-    cv.Optional(CONF_CONSUMPTION, {"name": "Energy"}): sensor.sensor_schema(
+    # time source for synchronization of water heater clock - used automatically if `time:` is configured
+    cv.OnlyWith(CONF_TIME_ID, "time"): cv.use_id(time_.RealTimeClock),
+
+    # main controls
+    _Entity(CONF_THERMOSTAT, "Thermostat"): climate.climate_schema(SmartBoilerThermostat),
+    _Entity(CONF_MODE, "Mode", icon="mdi:water-boiler"): select.select_schema(SmartBoilerModeSelect),
+    _Entity(CONF_PIN, "Pairing PIN", mode="BOX", icon="mdi:lock"): number.number_schema(
+            SmartBoilerPinInput, entity_category=ENTITY_CATEGORY_CONFIG),
+
+    # temperatures, heating, energy
+    _Entity(CONF_TEMP1, "Lower temperature"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS, accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT),
+    _Entity(CONF_TEMP2, "Upper temperature"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS, accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT),
+    _Entity(CONF_HEAT_ON, "Heating", icon="mdi:radiator"): binary_sensor.binary_sensor_schema(),
+    _Entity(CONF_CONSUMPTION, "Energy"): sensor.sensor_schema(
             unit_of_measurement=UNIT_KILOWATT_HOURS,
             icon=ICON_FLASH,
             accuracy_decimals=3,
             state_class=STATE_CLASS_TOTAL_INCREASING,
-            device_class=DEVICE_CLASS_ENERGY).extend(),
-    cv.Optional(CONF_ANODE_VOLTAGE, {"name": "Anode Voltage"}): sensor.sensor_schema(
-            unit_of_measurement=UNIT_VOLT,
-            icon=ICON_FLASH,
-            accuracy_decimals=3,
-            state_class=STATE_CLASS_MEASUREMENT).extend(),
-    cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
-    # status
-    cv.Optional(CONF_LOW_TARIFF): binary_sensor.binary_sensor_schema(icon="mdi:cash-clock"),
-    cv.Optional(CONF_PROBLEM): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_PROBLEM),
-    cv.Optional(CONF_ERROR): text_sensor.text_sensor_schema(
-            icon="mdi:alert-circle-outline", entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
-    cv.Optional(CONF_MODEL): text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
-    cv.Optional(CONF_CAPACITY): sensor.sensor_schema(
-            unit_of_measurement=UNIT_LITRE,
-            accuracy_decimals=0,
-            device_class=DEVICE_CLASS_VOLUME_STORAGE,
+            device_class=DEVICE_CLASS_ENERGY),
+    _Entity(CONF_RESET_ENERGY, "Reset energy"): button.button_schema(
+            SmartBoilerResetEnergyButton, icon="mdi:counter", entity_category=ENTITY_CATEGORY_CONFIG),
+
+    # HDO (ripple control)
+    _Entity(CONF_LOW_TARIFF, "Low tariff"): binary_sensor.binary_sensor_schema(icon="mdi:cash-clock"),
+    # state is published by water heater, restore mode DISABLED prevents writing a stale state on boot
+    _Entity(CONF_HDO, "HDO decoder"): switch.switch_schema(
+            SmartBoilerSwitch, icon="mdi:transmission-tower",
+            entity_category=ENTITY_CATEGORY_CONFIG, default_restore_mode="DISABLED"),
+    # same information as the HDO decoder switch, kept for backward compatibility
+    _Entity(CONF_HDO_LOW_TARIFF, "HDO", disabled_by_default=True): binary_sensor.binary_sensor_schema(
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
-    cv.Optional(CONF_PROG_TEMPERATURE): sensor.sensor_schema(
+
+    # PROG (night) program and holiday
+    _Entity(CONF_PROG_TEMPERATURE, "PROG temperature"): sensor.sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=0,
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT),
-    # controls (restore mode DISABLED - state always comes from the water heater)
-    cv.Optional(CONF_HDO): switch.switch_schema(
-            SmartBoilerSwitch, icon="mdi:transmission-tower",
-            entity_category=ENTITY_CATEGORY_CONFIG, default_restore_mode="DISABLED"),
-    cv.Optional(CONF_ANTILEGIONELLA): switch.switch_schema(
-            SmartBoilerSwitch, icon="mdi:bacteria-outline",
-            entity_category=ENTITY_CATEGORY_CONFIG, default_restore_mode="DISABLED"),
-    cv.Optional(CONF_PROG_TEMP_LOW): number.number_schema(
+    _Entity(CONF_PROG_TEMP_LOW, "PROG low temperature"): number.number_schema(
             SmartBoilerNumber, icon=ICON_THERMOMETER, unit_of_measurement=UNIT_CELSIUS,
             device_class=DEVICE_CLASS_TEMPERATURE, entity_category=ENTITY_CATEGORY_CONFIG),
-    cv.Optional(CONF_PROG_TEMP_HIGH): number.number_schema(
+    _Entity(CONF_PROG_TEMP_HIGH, "PROG high temperature"): number.number_schema(
             SmartBoilerNumber, icon=ICON_THERMOMETER, unit_of_measurement=UNIT_CELSIUS,
             device_class=DEVICE_CLASS_TEMPERATURE, entity_category=ENTITY_CATEGORY_CONFIG),
-    cv.Optional(CONF_HOLIDAY_START): number.number_schema(
+    _Entity(CONF_HOLIDAY_START, "Holiday starts in"): number.number_schema(
             SmartBoilerNumber, icon="mdi:calendar-start", unit_of_measurement="d",
             device_class=DEVICE_CLASS_DURATION),
-    cv.Optional(CONF_HOLIDAY_LENGTH): number.number_schema(
+    _Entity(CONF_HOLIDAY_LENGTH, "Holiday length"): number.number_schema(
             SmartBoilerNumber, icon="mdi:island", unit_of_measurement="d",
             device_class=DEVICE_CLASS_DURATION),
-    cv.Optional(CONF_RESET_ENERGY): button.button_schema(
-            SmartBoilerResetEnergyButton, icon="mdi:counter", entity_category=ENTITY_CATEGORY_CONFIG),
-}).extend(ble_client.BLE_CLIENT_SCHEMA)
+    _Entity(CONF_ANTILEGIONELLA, "Anti-legionella"): switch.switch_schema(
+            SmartBoilerSwitch, icon="mdi:bacteria-outline",
+            entity_category=ENTITY_CATEGORY_CONFIG, default_restore_mode="DISABLED"),
+
+    # diagnostics
+    _Entity(CONF_PROBLEM, "Problem"): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_PROBLEM),
+    _Entity(CONF_ERROR, "Error"): text_sensor.text_sensor_schema(
+            icon="mdi:alert-circle-outline", entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_STATE, "State", icon="mdi:connection"): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_ANODE_VOLTAGE, "Anode Voltage"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_VOLT,
+            icon=ICON_FLASH,
+            accuracy_decimals=3,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_BNAME, "Name"): text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_MODEL, "Model"): text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_VERSION, "Version"): text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_CAPACITY, "Capacity"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_LITRE,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_VOLUME_STORAGE,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+})).extend(ble_client.BLE_CLIENT_SCHEMA)
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
