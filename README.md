@@ -18,44 +18,62 @@ This ESPHome component uses several standard components (sensors, etc.) for easy
 
 ### Water heater outputs
 
-| Binary sensors | |
-| --- | --- |
-| HDO | On if HDO detection is enabled in the water heater |
-| Heat | On when the water heater is currently heating (consuming energy) |
+| Binary sensors | Config key | |
+| --- | --- | --- |
+| HDO | `hdo_low_tariff` | On if the internal HDO decoder is enabled in the water heater (not the current tariff, see `low_tariff`) |
+| Heat | `heat_on` | On when the water heater is currently heating (consuming energy) |
+| Low tariff | `low_tariff` | On when the low (cheaper) tariff is available now. Polled every 60 s |
+| Problem | `problem` | On when the water heater reports any error |
 
-| Sensors | |
-| --- | --- |
-| Temp1  | Temperature detected by lower temperature sensor |
-| Temp2  | Temperature detected by upper temperature sensor (this is the temperature displayed on the water heater) |
-| Normal temperature | Configured target temperature in NORMAL/HDO mode |
-| Energy | Energy consumed since last reset (in kWh) |
+| Sensors | Config key | |
+| --- | --- | --- |
+| Temp1 | `temp1` | Temperature detected by lower temperature sensor |
+| Temp2 | `temp2` | Temperature detected by upper temperature sensor (this is the temperature displayed on the water heater) |
+| Energy | `consumption` | Energy consumed since last reset (in kWh) |
+| Anode voltage | `anode_voltage` | Voltage of the protective anode |
+| Capacity | `capacity` | Configured volume of the water heater (l) |
+| PROG temperature | `prog_temperature` | Target temperature currently used by the PROG (night) program |
 
-| Text sensors | |
-| --- | --- |
-| Version | Firmware version, board version, and serial number |
-| State | Connection state: Disconnected / Authenticating / Require PIN / Connected |
-| Name  | Name of the water heater unit |
+| Text sensors | Config key | |
+| --- | --- | --- |
+| Version | `version` | Firmware version, board version, and serial number |
+| State | `state` | Connection state: Disconnected / Authenticating / Require PIN / Connected |
+| Name | `b_name` | Name of the water heater unit |
+| Model | `model` | Model of the water heater |
+| Error | `error` | `OK` or list of active errors (same codes Er01–Er09 as the original app) |
 
-| Inputs | |
-| --- | --- |
-| Pairing PIN | Input to set pairing PIN |
-| Mode  | Set one of the operating modes |
+| Inputs | Config key | |
+| --- | --- | --- |
+| Thermostat | `thermostat` | Target temperature for MANUAL/HDO mode (40–80 °C), current temperature and heating action |
+| Mode | `mode` | Operating mode, see below |
+| Pairing PIN | `pin` | Input to set pairing PIN |
+| HDO decoder | `hdo` | Switch to enable/disable the internal HDO (ripple control) decoder |
+| Anti-legionella | `antilegionella` | Switch for periodic anti-legionella heating (water heater FW 1.6 or newer) |
+| PROG low / high temperature | `prog_temp_low`, `prog_temp_high` | Temperatures used by the PROG (night) program, 10–80 °C, low must be lower than high |
+| Holiday starts in | `holiday_start` | Number of days until the holiday starts (0 = today) |
+| Holiday length | `holiday_length` | Holiday length in days, `0` cancels the holiday. The water heater switches to HOLIDAY mode for this period |
+| Reset energy | `reset_energy` | Button to reset the energy counter in the water heater |
+
+All new entities are optional - add only those you want to see in Home Assistant. Switches and numbers show the state reported by the water heater; after a change, the value is re-read from the water heater, so a rejected change is reverted in Home Assistant.
+
+To schedule a holiday, set `holiday_start` first and then `holiday_length` (setting the length sends both values to the water heater).
 
 ### Modes
 
 This is the list of recognized mode values. See the [original app](https://play.google.com/store/apps/details?id=cz.dzd.smartbojler&hl=cs&gl=US) for more details, but the names are self-explanatory.
 
-| Value           | Notes                       |
-| --------------- | --------------------------- |
-| STOP            | Cannot be set               |
-| NORMAL          | Can be set if hdo_enabled=0 |
-| HDO             | Can be set if hdo_enabled=1 |
-| SMART           | Can be set if hdo_enabled=0 |
-| SMARTHDO        | Can be set if hdo_enabled=1 |
-| ANTIFROST       |                             |
-| NIGHT           |                             |
+| Value      | Water heater mode           | Notes                                                    |
+| ---------- | --------------------------- | -------------------------------------------------------- |
+| MANUAL     | NORMAL (1) / HDO (2)        | HDO variant is used when the internal HDO decoder is on  |
+| SMART      | SMART (3) / SMARTHDO (4)    | HDO variant is used when the internal HDO decoder is on  |
+| ANTIFREEZE | ANTIFROST (5)               |                                                          |
+| PROG       | NIGHT (6)                   | Program/schedule is configured in the original app       |
+| STOP       | STOP (0)                    | Reported only, cannot be set                             |
+| TEST       | TEST (7)                    | Reported only, cannot be set                             |
+| HOLIDAY    | HOLIDAY (8)                 | Reported only, holiday is configured in the original app |
 
-Toggling mode will also enable/disable HDO based on the selected mode - NORMAL/HDO and SMART/SMARTHDO.
+The thermostat entity shows `off` when the water heater is in STOP mode and `heat` otherwise. Its mode cannot be changed; use the mode select instead.
+
 
 ## Pairing process
 

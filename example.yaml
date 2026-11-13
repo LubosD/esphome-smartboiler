@@ -55,6 +55,36 @@ smartboiler:
       name: "Water heater name"
     consumption:
       name: "Water heater energy"
+    anode_voltage:
+      name: "Water heater anode voltage"
+    # status
+    low_tariff:
+      name: "Water heater low tariff"
+    problem:
+      name: "Water heater problem"
+    error:
+      name: "Water heater error"
+    model:
+      name: "Water heater model"
+    capacity:
+      name: "Water heater capacity"
+    prog_temperature:
+      name: "Water heater PROG temperature"
+    # controls
+    hdo:
+      name: "Water heater HDO decoder"
+    antilegionella:
+      name: "Water heater anti-legionella"
+    prog_temp_low:
+      name: "Water heater PROG low temperature"
+    prog_temp_high:
+      name: "Water heater PROG high temperature"
+    holiday_start:
+      name: "Water heater holiday starts in"
+    holiday_length:
+      name: "Water heater holiday length"
+    reset_energy:
+      name: "Water heater reset energy"
 
 sensor:
   - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB

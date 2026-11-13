@@ -55,28 +55,35 @@ uint16_t SBProtocolResult::load_uint16_le(size_t position) {
 }
 
 SBProtocolResult::SBProtocolResult(const uint8_t *value, uint16_t value_len) {
+  this->mRawData = value;
+  this->mRqType = SBPacket::SBC_PACKET_NONE;
+  if (value == nullptr || value_len < 2)
+    return;
+
   // First two bytes contain a decimal value from SbcPacket as a string
   SBPacket cmd = static_cast<SBPacket>((value[0] - '0') * 10 + (value[1] - '0'));
   this->mRqType = cmd;
-  this->mRawData = value;
-  int i = 0;
   if (cmd == SBPacket::SBC_PACKET_NIGHT_GETDAYS) {
     // copy next 12 bytes
   } else if (cmd == SBPacket::SBC_PACKET_NIGHT_GETDAYS2) {
     // copy next 9 bytes
   } else if (cmd == SBPacket::SBC_PACKET_GLOBAL_CONFIRMUID) {
-    // confirmation packet includes UID of original request
-    this->mUid = this->load_uint16_le(2);
-    while (i < 16) {
-      this->mByteData.push_back(value[i + 4]);
-      i++;
+    // confirmation packet includes UID of original request followed by up to 16 bytes of data
+    if (value_len >= 4)
+      this->mUid = this->load_uint16_le(2);
+    for (int i = 4; i < value_len && i < 4 + 16; i++) {
+      this->mByteData.push_back(value[i]);
     }
-  } else if (cmd == SBPacket::SBC_PACKET_HOLIDAY_GET || cmd == SBPacket::SBC_PACKET_GLOBAL_FIRSTLOG ||
-             cmd == SBPacket::SBC_PACKET_GLOBAL_NEXTLOG) {
+  } else if (cmd == SBPacket::SBC_PACKET_GLOBAL_FIRSTLOG || cmd == SBPacket::SBC_PACKET_GLOBAL_NEXTLOG) {
     // two uint32 located at index 2 and 10
-  } else {
-    // the rest is a string
+  } else if (value_len > 4) {
+    // the rest is a string (last two bytes are not part of it)
+    // HOLIDAY_GET is also a string: two 8 digit decimal numbers (days to begin, length)
     std::string text(value + 2, value + value_len - 2);
+    // the original app treats the payload as NUL terminated string
+    auto nul = text.find('\0');
+    if (nul != std::string::npos)
+      text.resize(nul);
     this->mString = text;
   }
 }
