@@ -50,6 +50,7 @@ CONF_PROG_TEMP_HIGH = 'prog_temp_high'
 CONF_HOLIDAY_START = 'holiday_start'
 CONF_HOLIDAY_LENGTH = 'holiday_length'
 CONF_RESET_ENERGY = 'reset_energy'
+CONF_MONITORING = 'monitoring'
 
 # keep in sync with smartboiler.h
 PROG_MIN_TEMP = 10
@@ -74,6 +75,7 @@ NumberType = smartboiler_controller_ns.enum('NumberType', is_class=True)
 SWITCHES = {
     CONF_HDO: (SwitchType.HDO, 'set_hdo_switch'),
     CONF_ANTILEGIONELLA: (SwitchType.ANTILEGIONELLA, 'set_antilegionella_switch'),
+    CONF_MONITORING: (SwitchType.MONITORING, 'set_monitoring_switch'),
 }
 # numbers: config key -> (C++ type, setter, min, max)
 NUMBERS = {
@@ -116,6 +118,10 @@ CONFIG_SCHEMA = cv.polling_component_schema('600s').extend(_apply_entity_default
     cv.GenerateID(): cv.declare_id(SmartBoiler),
     # time source for synchronization of water heater clock - used automatically if `time:` is configured
     cv.OnlyWith(CONF_TIME_ID, "time"): cv.use_id(time_.RealTimeClock),
+
+    # enables/disables the connection to the water heater (only one device can be connected at a time)
+    _Entity(CONF_MONITORING, "Monitoring"): switch.switch_schema(
+            SmartBoilerSwitch, icon="mdi:bluetooth-connect", default_restore_mode="DISABLED"),
 
     # main controls
     _Entity(CONF_THERMOSTAT, "Thermostat"): climate.climate_schema(SmartBoilerThermostat),

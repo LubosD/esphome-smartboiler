@@ -62,7 +62,7 @@ class SmartBoilerSwitch;
 class SmartBoilerNumber;
 class SmartBoilerResetEnergyButton;
 
-enum class SwitchType : uint8_t { HDO, ANTILEGIONELLA };
+enum class SwitchType : uint8_t { HDO, ANTILEGIONELLA, MONITORING };
 enum class NumberType : uint8_t { PROG_TEMP_LOW, PROG_TEMP_HIGH, HOLIDAY_START, HOLIDAY_LENGTH };
 
 enum class ConnectionState { DISCONNECTED, AUTHENTICATING, CONNECTED, NEED_PIN };
@@ -103,6 +103,7 @@ class SmartBoiler : public PollingComponent,
   void set_prog_temperature(sensor::Sensor *s) { prog_temperature_sensor_ = s; }
   void set_hdo_switch(SmartBoilerSwitch *s) { hdo_switch_ = s; }
   void set_antilegionella_switch(SmartBoilerSwitch *s) { antilegionella_switch_ = s; }
+  void set_monitoring_switch(SmartBoilerSwitch *s) { monitoring_switch_ = s; }
   void set_prog_temp_low_number(SmartBoilerNumber *n) { prog_temp_low_number_ = n; }
   void set_prog_temp_high_number(SmartBoilerNumber *n) { prog_temp_high_number_ = n; }
   void set_holiday_start_number(SmartBoilerNumber *n) { holiday_start_number_ = n; }
@@ -120,6 +121,7 @@ class SmartBoiler : public PollingComponent,
   void refresh_after_(SBPacket request);
   void publish_error_(uint32_t mask);
   void parse_holiday_(const std::string &payload);
+  void publish_monitoring_();
   void handle_incoming(const uint8_t *data, uint16_t length);
   void request_value(SBPacket value, uint16_t uid = 0);
   void send_to_boiler(SBProtocolRequest request);
@@ -197,6 +199,7 @@ class SmartBoiler : public PollingComponent,
   sensor::Sensor *prog_temperature_sensor_ = nullptr;
   SmartBoilerSwitch *hdo_switch_ = nullptr;
   SmartBoilerSwitch *antilegionella_switch_ = nullptr;
+  SmartBoilerSwitch *monitoring_switch_ = nullptr;
   SmartBoilerNumber *prog_temp_low_number_ = nullptr;
   SmartBoilerNumber *prog_temp_high_number_ = nullptr;
   SmartBoilerNumber *holiday_start_number_ = nullptr;

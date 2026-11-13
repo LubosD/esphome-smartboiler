@@ -65,6 +65,12 @@ void SmartBoiler::setup() {
   }
   if (this->state_txt_)
     this->state_txt_->publish_state(this->state_to_string(this->state_));
+  this->publish_monitoring_();
+}
+
+void SmartBoiler::publish_monitoring_() {
+  if (this->monitoring_switch_)
+    this->monitoring_switch_->publish_state(this->parent_->enabled);
 }
 
 void SmartBoiler::dump_config() {
@@ -89,6 +95,7 @@ void SmartBoiler::dump_config() {
   LOG_SENSOR("  ", "PROG temperature", prog_temperature_sensor_);
   LOG_SWITCH("  ", "HDO", hdo_switch_);
   LOG_SWITCH("  ", "Anti-legionella", antilegionella_switch_);
+  LOG_SWITCH("  ", "Monitoring", monitoring_switch_);
   LOG_NUMBER("  ", "PROG low temperature", prog_temp_low_number_);
   LOG_NUMBER("  ", "PROG high temperature", prog_temp_high_number_);
   LOG_NUMBER("  ", "Holiday start", holiday_start_number_);
@@ -203,6 +210,9 @@ void SmartBoiler::on_switch(SwitchType type, bool state) {
       this->enqueue_command_(cmd);
       break;
     }
+    case SwitchType::MONITORING:
+      // handled directly in SmartBoilerSwitch::write_state
+      break;
   }
 }
 
@@ -387,6 +397,7 @@ void SmartBoiler::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
       if (param->open.status == ESP_GATT_OK) {
         ESP_LOGI(TAG, "[%s] Connected", this->parent_->address_str());
       }
+      this->publish_monitoring_();
       break;
     }
     case ESP_GATTC_DISCONNECT_EVT: {
@@ -394,6 +405,7 @@ void SmartBoiler::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
       this->gatt_ready_ = false;
       this->clear_queues_();
       this->set_state(ConnectionState::DISCONNECTED);
+      this->publish_monitoring_();
       break;
     }
     case ESP_GATTC_SEARCH_CMPL_EVT: {
@@ -828,6 +840,13 @@ void SmartBoiler::handle_incoming(const uint8_t *value, uint16_t value_len) {
 void SmartBoilerModeSelect::control(const std::string &value) { get_parent()->on_set_mode(value); }
 
 void SmartBoilerSwitch::write_state(bool state) {
+  if (this->type_ == SwitchType::MONITORING) {
+    // enables/disables the BLE connection to the water heater (same as ble_client switch)
+    ESP_LOGI(TAG, "Monitoring %s", state ? "enabled" : "disabled");
+    this->get_parent()->parent()->set_enabled(state);
+    this->publish_state(state);
+    return;
+  }
   if (this->get_parent()->state_ != ConnectionState::CONNECTED) {
     ESP_LOGW(TAG, "Not connected to water heater, switch change ignored.");
     return;

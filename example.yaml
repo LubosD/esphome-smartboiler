@@ -34,11 +34,6 @@ time:
 
 ble_client:
   - mac_address: XX:XX:XX:XX:XX:XX
-    id: water_heater
 
 smartboiler:
 
-switch:
-  - platform: ble_client
-    ble_client_id: water_heater
-    name: "Monitoring"

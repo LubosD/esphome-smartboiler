@@ -22,6 +22,7 @@ All entities are created automatically with the default names below. In Home Ass
 
 | Default name | Config key | Type | Description |
 | --- | --- | --- | --- |
+| Monitoring | `monitoring` | switch | Enables/disables the connection to the water heater, see below |
 | Thermostat | `thermostat` | climate | Target temperature for MANUAL/HDO mode (40–80 °C), current (upper) temperature and heating action |
 | Mode | `mode` | select | Operating mode, see below |
 | Lower temperature | `temp1` | sensor | Temperature detected by the lower temperature sensor |
@@ -84,6 +85,7 @@ The thermostat entity shows `off` when the water heater is in STOP mode and `hea
 
 * `smartboiler:` is no longer a list - remove the leading `- ` and fix the indentation.
 * `ble_client_id` and `time_id` can be omitted when there is only one BLE client / time source.
+* The monitoring switch is created by the component - remove the `switch:` with `platform: ble_client` (otherwise there would be two switches doing the same).
 * Entity names are now optional. To keep the existing pairing, **first flash the new version with your existing entity names** - the pairing UID is then migrated to a new storage key, which does not depend on entity names. After that you can remove the names. If you change the thermostat name before this migration, the water heater has to be paired again.
 
 ## Pairing process
@@ -133,17 +135,12 @@ time:
 
 ble_client:
   - mac_address: XX:XX:XX:XX:XX:XX
-    id: water_heater
 
 smartboiler:
 
-switch:
-  - platform: ble_client
-    ble_client_id: water_heater
-    name: "Monitoring"
 ```
 
-I strongly recommend adding a switch to enable/disable the monitoring. The water heater allows only one device to connect at a time, and you might need to disconnect the monitoring when you want to use the mobile application for some complex settings or firmware upgrades.
+The *Monitoring* switch enables/disables the connection to the water heater. The water heater allows only one device to be connected at a time, so turn the monitoring off when you want to use the mobile application (e.g. for firmware upgrades). The connection is always enabled after the ESP restarts.
 
 ### 2. Pairing with PIN
 
