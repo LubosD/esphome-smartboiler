@@ -2,6 +2,9 @@
 
 This ESPHome component connects to Dražice OKHE smart water heaters via Bluetooth Low Energy, collects data, and also allows for limited remote control.
 
+> [!WARNING]
+> **Upgrading to v2.0.0:** the YAML configuration format has changed and in some cases the water heater may need to be **paired again** (enter the PIN shown on the water heater in Home Assistant). See [Upgrading from older versions](#upgrading-from-older-versions) and the [changelog](CHANGELOG.md). To stay on the previous version, use `ref: v1.0.0` in `external_components`.
+
 You will need an ESP32 module and Home Assistant with the ESPHome integration. You also need to determine the MAC address of your water heater. See an [example configuration](example.yaml).
 
 Note that only one device can be connected to the water heater at a time.
@@ -101,7 +104,7 @@ When ESPHome finds an old configuration, it shows a warning with a link to this 
 * `smartboiler:` is no longer a list - remove the leading `- ` and fix the indentation. A list with one item still works (with a warning), more water heaters on one ESP are not supported anymore.
 * `ble_client_id` and `time_id` can be omitted when there is only one BLE client / time source.
 * The monitoring switch is created by the component - remove the `switch:` with `platform: ble_client` (otherwise there would be two switches doing the same).
-* Entity names are now optional, you can remove them right away. The pairing is kept - the stored pairing UID is found and migrated automatically on the first start of the new version (if the ESP was used for more water heaters before, the UID cannot be chosen and the water heater has to be paired again).
+* Entity names are now optional, you can remove them right away. The new version tries to find and migrate the stored pairing UID on the first start, so the pairing is usually kept. If the *State* entity shows `Require PIN` after the upgrade (e.g. the ESP was used for more water heaters before), pair the water heater again - see [Pairing with PIN](#2-pairing-with-pin).
 
 ## Pairing process
 
