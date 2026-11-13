@@ -1,5 +1,8 @@
+import logging
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
+import esphome.final_validate as fv
 from esphome.components import (
     ble_client, sensor,
     select, binary_sensor,
@@ -7,7 +10,7 @@ from esphome.components import (
     switch, button,
 )
 from esphome.const import (
-    CONF_ID, CONF_NAME, CONF_STATE, CONF_PIN,
+    CONF_ID, CONF_NAME, CONF_STATE, CONF_PIN, CONF_PLATFORM,
     CONF_VERSION, UNIT_CELSIUS,
     ICON_THERMOMETER, ICON_FLASH,
     ENTITY_CATEGORY_DIAGNOSTIC,
@@ -56,6 +59,11 @@ CONF_MONITORING = 'monitoring'
 PROG_MIN_TEMP = 10
 PROG_MAX_TEMP = 80
 HOLIDAY_MAX_DAYS = 365
+
+_LOGGER = logging.getLogger(__name__)
+
+CONF_BLE_CLIENT_ID = 'ble_client_id'
+UPGRADE_DOCS = "https://github.com/pedobry/esphome-smartboiler#upgrading-from-older-versions"
 
 smartboiler_controller_ns = cg.esphome_ns.namespace('sb')
 
@@ -114,7 +122,7 @@ def _apply_entity_defaults(schema):
     }
 
 
-CONFIG_SCHEMA = cv.polling_component_schema('600s').extend(_apply_entity_defaults({
+_SCHEMA = cv.polling_component_schema('600s').extend(_apply_entity_defaults({
     cv.GenerateID(): cv.declare_id(SmartBoiler),
     # time source for synchronization of water heater clock - used automatically if `time:` is configured
     cv.OnlyWith(CONF_TIME_ID, "time"): cv.use_id(time_.RealTimeClock),
@@ -199,6 +207,39 @@ CONFIG_SCHEMA = cv.polling_component_schema('600s').extend(_apply_entity_default
             device_class=DEVICE_CLASS_VOLUME_STORAGE,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 })).extend(ble_client.BLE_CLIENT_SCHEMA)
+
+
+def _migrate_list_config(value):
+    """Older versions used a list (`- ble_client_id: ...`), now a single mapping is expected."""
+    if not isinstance(value, list):
+        return value
+    if len(value) == 1:
+        _LOGGER.warning(
+            "smartboiler: configuration is no longer a list - remove the leading '- ' and "
+            "fix the indentation. See %s", UPGRADE_DOCS)
+        return value[0]
+    raise cv.Invalid(
+        f"smartboiler: only one water heater per ESP is supported now ({len(value)} configured). "
+        f"Use a separate ESP for each water heater. See {UPGRADE_DOCS}")
+
+
+CONFIG_SCHEMA = cv.All(_migrate_list_config, _SCHEMA)
+
+
+def _final_validate(config):
+    # the monitoring switch is created by this component now - warn about the old ble_client switch
+    full_config = fv.full_config.get()
+    client_id = config[CONF_BLE_CLIENT_ID]
+    for sw in full_config.get("switch", []):
+        if sw.get(CONF_PLATFORM) == "ble_client" and sw.get(CONF_BLE_CLIENT_ID) == client_id:
+            _LOGGER.warning(
+                "smartboiler: the monitoring switch is now created by the component, "
+                "remove the 'switch' with 'platform: ble_client' (%s). See %s",
+                sw.get(CONF_NAME, sw.get(CONF_ID)), UPGRADE_DOCS)
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _final_validate
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])

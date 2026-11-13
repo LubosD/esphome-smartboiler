@@ -81,9 +81,24 @@ This is the list of recognized mode values. See the [original app](https://play.
 The thermostat entity shows `off` when the water heater is in STOP mode and `heat` otherwise. Its mode cannot be changed; use the mode select instead.
 
 
+## Versions
+
+Releases are tagged (`v1.0.0`, `v2.0.0`, ...), see the [changelog](CHANGELOG.md). Without `ref`, ESPHome downloads the latest version of the default branch (refreshed daily), which can include changes requiring an update of your YAML. To control when you upgrade, pin a version:
+
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/pedobry/esphome-smartboiler
+      ref: v2.0.0
+    components: [smartboiler]
+```
+
 ## Upgrading from older versions
 
-* `smartboiler:` is no longer a list - remove the leading `- ` and fix the indentation.
+When ESPHome finds an old configuration, it shows a warning with a link to this section. If you are not ready to upgrade, pin `ref: v1.0.0`.
+
+* `smartboiler:` is no longer a list - remove the leading `- ` and fix the indentation. A list with one item still works (with a warning), more water heaters on one ESP are not supported anymore.
 * `ble_client_id` and `time_id` can be omitted when there is only one BLE client / time source.
 * The monitoring switch is created by the component - remove the `switch:` with `platform: ble_client` (otherwise there would be two switches doing the same).
 * Entity names are now optional. To keep the existing pairing, **first flash the new version with your existing entity names** - the pairing UID is then migrated to a new storage key, which does not depend on entity names. After that you can remove the names. If you change the thermostat name before this migration, the water heater has to be paired again.
