@@ -9,6 +9,22 @@ You will need an ESP32 module and Home Assistant with the ESPHome integration. Y
 
 Note that only one device can be connected to the water heater at a time.
 
+## Contents
+
+- [Hardware](#hardware)
+- [Documentation](#documentation)
+  - [Entities](#entities)
+  - [Holiday](#holiday)
+  - [Modes](#modes)
+- [Versions](#versions)
+- [Upgrading from older versions](#upgrading-from-older-versions)
+- [Pairing process](#pairing-process)
+  - [1. Configure ESP device](#1-configure-esp-device)
+  - [2. Pairing with PIN](#2-pairing-with-pin)
+- [Tips](#tips)
+  - [Setting time on water heater](#setting-time-on-water-heater)
+  - [How to reset UUID](#how-to-reset-uuid)
+
 ## Hardware
 
 This component has been tested on:
@@ -200,6 +216,8 @@ Changing/setting the PIN in other states is ignored.\
 Once the pairing is completed (state is `Connected`), the PIN value is also ignored.
 
 The ESP32 stores the UUID in NVM and pairing is persistent between restarts.
+
+## Tips
 
 ### Setting time on water heater
 The water heater has internal clock which measure date-less time (only day of the week and hours, minutes and seconds). This is used for scheduling of water heater stated or temperatures (available only in original app). For that, it's necessary that water heater has proper time set up. Unfortunately, the time is lost after power outage and needs to be set up again.
