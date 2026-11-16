@@ -102,6 +102,9 @@ enum Mode: uint8_t {
   SMART_HDO = 4,
   ANTIFREEZE = 5,
   PROG = 6,
+  // following modes are reported by water heater, but cannot be set via SETMODE
+  TEST = 7,
+  HOLIDAY = 8,
 };
 
 class SBProtocolRequest {
@@ -127,6 +130,9 @@ class SBProtocolRequest {
   std::vector<uint8_t> mData;
   SBPacket mRqType;
   uint16_t mUid = 0;
+  // millis() of the first and the most recent transmission (0 = not sent yet)
+  uint32_t mFirstSent = 0;
+  uint32_t mLastSent = 0;
 };
 
 class SBProtocolResult {
