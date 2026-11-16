@@ -1,22 +1,34 @@
+import logging
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
+import esphome.final_validate as fv
 from esphome.components import (
     ble_client, sensor,
     select, binary_sensor,
-    climate, number, text_sensor
+    climate, number, text_sensor, time as time_,
+    switch, button,
 )
 from esphome.const import (
-    CONF_ID,CONF_STATE, CONF_PIN,
+    CONF_ID, CONF_NAME, CONF_STATE, CONF_PIN, CONF_PLATFORM,
     CONF_VERSION, UNIT_CELSIUS,
     ICON_THERMOMETER, ICON_FLASH,
     ENTITY_CATEGORY_DIAGNOSTIC,
     UNIT_KILOWATT_HOURS,
     STATE_CLASS_TOTAL_INCREASING,
-    DEVICE_CLASS_ENERGY
+    DEVICE_CLASS_ENERGY,
+    UNIT_VOLT,
+    STATE_CLASS_MEASUREMENT,
+    ENTITY_CATEGORY_CONFIG,
+    DEVICE_CLASS_PROBLEM,
+    DEVICE_CLASS_TEMPERATURE,
+    DEVICE_CLASS_VOLUME_STORAGE,
+    DEVICE_CLASS_DURATION,
+    UNIT_LITRE,
 )
 
-AUTO_LOAD = ["sensor", "binary_sensor", "select", "climate", "esp32_ble_tracker", "number", "text_sensor"]
-MULTI_CONF = 3
+AUTO_LOAD = ["sensor", "binary_sensor", "select", "climate", "esp32_ble_tracker", "number", "text_sensor",
+             "switch", "button"]
 
 CONF_TEMP1 = 'temp1'
 CONF_TEMP2 = 'temp2'
@@ -26,6 +38,32 @@ CONF_HEAT_ON = 'heat_on'
 CONF_THERMOSTAT = 'thermostat'
 CONF_CONSUMPTION = 'consumption'
 CONF_BNAME = "b_name"
+CONF_ANODE_VOLTAGE = 'anode_voltage'
+CONF_TIME_ID = 'time_id'
+CONF_LOW_TARIFF = 'low_tariff'
+CONF_PROBLEM = 'problem'
+CONF_ERROR = 'error'
+CONF_MODEL = 'model'
+CONF_CAPACITY = 'capacity'
+CONF_PROG_TEMPERATURE = 'prog_temperature'
+CONF_HDO = 'hdo'
+CONF_ANTILEGIONELLA = 'antilegionella'
+CONF_PROG_TEMP_LOW = 'prog_temp_low'
+CONF_PROG_TEMP_HIGH = 'prog_temp_high'
+CONF_HOLIDAY_START = 'holiday_start'
+CONF_HOLIDAY_LENGTH = 'holiday_length'
+CONF_RESET_ENERGY = 'reset_energy'
+CONF_MONITORING = 'monitoring'
+
+# keep in sync with smartboiler.h
+PROG_MIN_TEMP = 10
+PROG_MAX_TEMP = 80
+HOLIDAY_MAX_DAYS = 365
+
+_LOGGER = logging.getLogger(__name__)
+
+CONF_BLE_CLIENT_ID = 'ble_client_id'
+UPGRADE_DOCS = "https://github.com/pedobry/esphome-smartboiler#upgrading-from-older-versions"
 
 smartboiler_controller_ns = cg.esphome_ns.namespace('sb')
 
@@ -35,37 +73,182 @@ SmartBoiler = smartboiler_controller_ns.class_(
 SmartBoilerModeSelect = smartboiler_controller_ns.class_('SmartBoilerModeSelect', select.Select)
 SmartBoilerThermostat = smartboiler_controller_ns.class_('SmartBoilerThermostat', climate.Climate)
 SmartBoilerPinInput = smartboiler_controller_ns.class_('SmartBoilerPinInput', number.Number)
+SmartBoilerSwitch = smartboiler_controller_ns.class_('SmartBoilerSwitch', switch.Switch)
+SmartBoilerNumber = smartboiler_controller_ns.class_('SmartBoilerNumber', number.Number)
+SmartBoilerResetEnergyButton = smartboiler_controller_ns.class_('SmartBoilerResetEnergyButton', button.Button)
+SwitchType = smartboiler_controller_ns.enum('SwitchType', is_class=True)
+NumberType = smartboiler_controller_ns.enum('NumberType', is_class=True)
 
-CONFIG_SCHEMA = cv.polling_component_schema('600s').extend({
+# switches: config key -> (C++ type, setter)
+SWITCHES = {
+    CONF_HDO: (SwitchType.HDO, 'set_hdo_switch'),
+    CONF_ANTILEGIONELLA: (SwitchType.ANTILEGIONELLA, 'set_antilegionella_switch'),
+    CONF_MONITORING: (SwitchType.MONITORING, 'set_monitoring_switch'),
+}
+# numbers: config key -> (C++ type, setter, min, max)
+NUMBERS = {
+    CONF_PROG_TEMP_LOW: (NumberType.PROG_TEMP_LOW, 'set_prog_temp_low_number', PROG_MIN_TEMP, PROG_MAX_TEMP),
+    CONF_PROG_TEMP_HIGH: (NumberType.PROG_TEMP_HIGH, 'set_prog_temp_high_number', PROG_MIN_TEMP, PROG_MAX_TEMP),
+    CONF_HOLIDAY_START: (NumberType.HOLIDAY_START, 'set_holiday_start_number', 0, HOLIDAY_MAX_DAYS),
+    CONF_HOLIDAY_LENGTH: (NumberType.HOLIDAY_LENGTH, 'set_holiday_length_number', 0, HOLIDAY_MAX_DAYS),
+}
+
+class _Entity(cv.Optional):
+    """Optional entity which is created automatically with a default name.
+
+    Options set by the user are merged with the defaults, so the entity can be renamed
+    (`name`), hidden from Home Assistant (`internal: true`) or disabled by default
+    (`disabled_by_default: true`) without repeating the other options.
+    """
+
+    def __init__(self, key, name, **defaults):
+        super().__init__(key, default={})
+        self.entity_defaults = {CONF_NAME: name, **defaults}
+
+
+def _with_defaults(schema, defaults):
+    def validator(value):
+        merged = dict(defaults)
+        merged.update(value or {})
+        return schema(merged)
+
+    return validator
+
+
+def _apply_entity_defaults(schema):
+    return {
+        key: _with_defaults(value, key.entity_defaults) if isinstance(key, _Entity) else value
+        for key, value in schema.items()
+    }
+
+
+_SCHEMA = cv.polling_component_schema('600s').extend(_apply_entity_defaults({
     cv.GenerateID(): cv.declare_id(SmartBoiler),
-    cv.Optional(CONF_TEMP1): sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, icon=ICON_THERMOMETER, accuracy_decimals=1).extend(),
-    cv.Optional(CONF_TEMP2): sensor.sensor_schema(unit_of_measurement=UNIT_CELSIUS, icon=ICON_THERMOMETER, accuracy_decimals=1).extend(),
-    cv.Optional(CONF_HDO_LOW_TARIFF, {"name": "HDO"}): binary_sensor.binary_sensor_schema().extend(),
-    cv.Optional(CONF_HEAT_ON, {"name":"Heating", "icon": "mdi:radiator"}): binary_sensor.binary_sensor_schema().extend(),
-    cv.Optional(CONF_MODE): select.select_schema(select.Select).extend({
-        cv.GenerateID(): cv.declare_id(SmartBoilerModeSelect),
-    }),
-    cv.Optional(CONF_THERMOSTAT): climate.climate_schema(climate.Climate).extend({
-        cv.GenerateID(): cv.declare_id(SmartBoilerThermostat),
-    }),
-    cv.Optional(CONF_PIN, {"name": "Pairing PIN", "mode": "BOX", "icon": "mdi:lock"}): number.number_schema(number.Number).extend({
-        cv.GenerateID(): cv.declare_id(SmartBoilerPinInput),
-    }),
-    cv.Optional(CONF_STATE, {"name": "State", "icon": "mdi:connection" }): text_sensor.text_sensor_schema().extend(),
-    cv.Optional(CONF_VERSION, {"name": "Version", "entity_category": ENTITY_CATEGORY_DIAGNOSTIC }): text_sensor.text_sensor_schema().extend(),
-    cv.Optional(CONF_BNAME, {"name": "Name" }): text_sensor.text_sensor_schema().extend(),
-    cv.Optional(CONF_CONSUMPTION, {"name": "Energy"}): sensor.sensor_schema(
+    # time source for synchronization of water heater clock - used automatically if `time:` is configured
+    cv.OnlyWith(CONF_TIME_ID, "time"): cv.use_id(time_.RealTimeClock),
+
+    # enables/disables the connection to the water heater (only one device can be connected at a time)
+    _Entity(CONF_MONITORING, "Monitoring"): switch.switch_schema(
+            SmartBoilerSwitch, icon="mdi:bluetooth-connect", default_restore_mode="DISABLED"),
+
+    # main controls
+    _Entity(CONF_THERMOSTAT, "Thermostat"): climate.climate_schema(SmartBoilerThermostat),
+    _Entity(CONF_MODE, "Mode", icon="mdi:water-boiler"): select.select_schema(SmartBoilerModeSelect),
+    _Entity(CONF_PIN, "Pairing PIN", mode="BOX", icon="mdi:lock"): number.number_schema(
+            SmartBoilerPinInput, entity_category=ENTITY_CATEGORY_CONFIG),
+
+    # temperatures, heating, energy
+    _Entity(CONF_TEMP1, "Lower temperature"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS, accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT),
+    _Entity(CONF_TEMP2, "Upper temperature"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS, accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE, state_class=STATE_CLASS_MEASUREMENT),
+    _Entity(CONF_HEAT_ON, "Heating", icon="mdi:radiator"): binary_sensor.binary_sensor_schema(),
+    _Entity(CONF_CONSUMPTION, "Energy"): sensor.sensor_schema(
             unit_of_measurement=UNIT_KILOWATT_HOURS,
             icon=ICON_FLASH,
             accuracy_decimals=3,
             state_class=STATE_CLASS_TOTAL_INCREASING,
-            device_class=DEVICE_CLASS_ENERGY).extend(),
-}).extend(ble_client.BLE_CLIENT_SCHEMA)
+            device_class=DEVICE_CLASS_ENERGY),
+    _Entity(CONF_RESET_ENERGY, "Reset energy"): button.button_schema(
+            SmartBoilerResetEnergyButton, icon="mdi:counter", entity_category=ENTITY_CATEGORY_CONFIG),
+
+    # HDO (ripple control)
+    _Entity(CONF_LOW_TARIFF, "Low tariff"): binary_sensor.binary_sensor_schema(icon="mdi:cash-clock"),
+    # state is published by water heater, restore mode DISABLED prevents writing a stale state on boot
+    _Entity(CONF_HDO, "HDO decoder"): switch.switch_schema(
+            SmartBoilerSwitch, icon="mdi:transmission-tower",
+            entity_category=ENTITY_CATEGORY_CONFIG, default_restore_mode="DISABLED"),
+    # same information as the HDO decoder switch, kept for backward compatibility
+    _Entity(CONF_HDO_LOW_TARIFF, "HDO", disabled_by_default=True): binary_sensor.binary_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+
+    # PROG (night) program and holiday
+    _Entity(CONF_PROG_TEMPERATURE, "PROG temperature"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT),
+    _Entity(CONF_PROG_TEMP_LOW, "PROG low temperature"): number.number_schema(
+            SmartBoilerNumber, icon=ICON_THERMOMETER, unit_of_measurement=UNIT_CELSIUS,
+            device_class=DEVICE_CLASS_TEMPERATURE, entity_category=ENTITY_CATEGORY_CONFIG),
+    _Entity(CONF_PROG_TEMP_HIGH, "PROG high temperature"): number.number_schema(
+            SmartBoilerNumber, icon=ICON_THERMOMETER, unit_of_measurement=UNIT_CELSIUS,
+            device_class=DEVICE_CLASS_TEMPERATURE, entity_category=ENTITY_CATEGORY_CONFIG),
+    _Entity(CONF_HOLIDAY_START, "Holiday starts in"): number.number_schema(
+            SmartBoilerNumber, icon="mdi:calendar-start", unit_of_measurement="d",
+            device_class=DEVICE_CLASS_DURATION),
+    _Entity(CONF_HOLIDAY_LENGTH, "Holiday length"): number.number_schema(
+            SmartBoilerNumber, icon="mdi:island", unit_of_measurement="d",
+            device_class=DEVICE_CLASS_DURATION),
+    _Entity(CONF_ANTILEGIONELLA, "Anti-legionella"): switch.switch_schema(
+            SmartBoilerSwitch, icon="mdi:bacteria-outline",
+            entity_category=ENTITY_CATEGORY_CONFIG, default_restore_mode="DISABLED"),
+
+    # diagnostics
+    _Entity(CONF_PROBLEM, "Problem"): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_PROBLEM),
+    _Entity(CONF_ERROR, "Error"): text_sensor.text_sensor_schema(
+            icon="mdi:alert-circle-outline", entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_STATE, "State", icon="mdi:connection"): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_ANODE_VOLTAGE, "Anode Voltage"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_VOLT,
+            icon=ICON_FLASH,
+            accuracy_decimals=3,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_BNAME, "Name"): text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_MODEL, "Model"): text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_VERSION, "Version"): text_sensor.text_sensor_schema(entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+    _Entity(CONF_CAPACITY, "Capacity"): sensor.sensor_schema(
+            unit_of_measurement=UNIT_LITRE,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_VOLUME_STORAGE,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+})).extend(ble_client.BLE_CLIENT_SCHEMA)
+
+
+def _migrate_list_config(value):
+    """Older versions used a list (`- ble_client_id: ...`), now a single mapping is expected."""
+    if not isinstance(value, list):
+        return value
+    if len(value) == 1:
+        _LOGGER.warning(
+            "smartboiler: configuration is no longer a list - remove the leading '- ' and "
+            "fix the indentation. See %s", UPGRADE_DOCS)
+        return value[0]
+    raise cv.Invalid(
+        f"smartboiler: only one water heater per ESP is supported now ({len(value)} configured). "
+        f"Use a separate ESP for each water heater. See {UPGRADE_DOCS}")
+
+
+CONFIG_SCHEMA = cv.All(_migrate_list_config, _SCHEMA)
+
+
+def _final_validate(config):
+    # the monitoring switch is created by this component now - warn about the old ble_client switch
+    full_config = fv.full_config.get()
+    client_id = config[CONF_BLE_CLIENT_ID]
+    for sw in full_config.get("switch", []):
+        if sw.get(CONF_PLATFORM) == "ble_client" and sw.get(CONF_BLE_CLIENT_ID) == client_id:
+            _LOGGER.warning(
+                "smartboiler: the monitoring switch is now created by the component, "
+                "remove the 'switch' with 'platform: ble_client' (%s). See %s",
+                sw.get(CONF_NAME, sw.get(CONF_ID)), UPGRADE_DOCS)
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _final_validate
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await ble_client.register_ble_node(var, config)
+
+    if CONF_ANODE_VOLTAGE in config:
+        sens = await sensor.new_sensor(config[CONF_ANODE_VOLTAGE])
+        cg.add(var.set_anode_voltage(sens))
 
     if CONF_TEMP1 in config:
         sens = await sensor.new_sensor(config[CONF_TEMP1])
@@ -88,7 +271,7 @@ async def to_code(config):
         cg.add(var.set_heat_on(sens))
 
     if CONF_MODE in config:
-        sel = await select.new_select(config[CONF_MODE], options=['ANTIFREEZE', 'SMART', 'PROG', 'MANUAL'])
+        sel = await select.new_select(config[CONF_MODE], options=['ANTIFREEZE', 'SMART', 'PROG', 'MANUAL', 'STOP', 'HOLIDAY', 'TEST'])
         cg.add(var.set_mode(sel))
         await cg.register_parented(sel, var)
 
@@ -118,3 +301,51 @@ async def to_code(config):
         name = cg.new_Pvariable(config[CONF_BNAME][CONF_ID])
         await text_sensor.register_text_sensor(name, config[CONF_BNAME])
         cg.add(var.set_name(name))
+
+    if CONF_TIME_ID in config:
+        rtc = await cg.get_variable(config[CONF_TIME_ID])
+        cg.add(var.set_time_clock(rtc))
+
+    # status
+    if CONF_LOW_TARIFF in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_LOW_TARIFF])
+        cg.add(var.set_low_tariff(sens))
+
+    if CONF_PROBLEM in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_PROBLEM])
+        cg.add(var.set_problem(sens))
+
+    if CONF_ERROR in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_ERROR])
+        cg.add(var.set_error(sens))
+
+    if CONF_MODEL in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_MODEL])
+        cg.add(var.set_model(sens))
+
+    if CONF_CAPACITY in config:
+        sens = await sensor.new_sensor(config[CONF_CAPACITY])
+        cg.add(var.set_capacity(sens))
+
+    if CONF_PROG_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_PROG_TEMPERATURE])
+        cg.add(var.set_prog_temperature(sens))
+
+    # controls
+    for key, (sw_type, setter) in SWITCHES.items():
+        if key in config:
+            sw = await switch.new_switch(config[key])
+            await cg.register_parented(sw, var)
+            cg.add(sw.set_type(sw_type))
+            cg.add(getattr(var, setter)(sw))
+
+    for key, (num_type, setter, min_value, max_value) in NUMBERS.items():
+        if key in config:
+            num = await number.new_number(config[key], min_value=min_value, max_value=max_value, step=1)
+            await cg.register_parented(num, var)
+            cg.add(num.set_type(num_type))
+            cg.add(getattr(var, setter)(num))
+
+    if CONF_RESET_ENERGY in config:
+        btn = await button.new_button(config[CONF_RESET_ENERGY])
+        await cg.register_parented(btn, var)

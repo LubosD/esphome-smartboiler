@@ -1,79 +1,39 @@
 esphome:
-  name: "test-node"
+  name: water-heater
+  friendly_name: Water heater
 
 esp32:
   board: nodemcu-32s
   framework:
-    type: arduino
-
-substitutions:
-  mac_water_heater: XX:XX:XX:XX:XX:XX
+    type: esp-idf
 
 external_components:
-  - source: 
+  - source:
       type: git
       url: https://github.com/pedobry/esphome-smartboiler
     components: [smartboiler]
+
+logger:
 
 # Enable Home Assistant API
 api:
   encryption:
     key: !secret ha_API_key
 
-ble_client:
-  - mac_address: ${mac_water_heater}
-    id: drazice_okhe
-
-smartboiler:
-  - ble_client_id: drazice_okhe
-    temp1:
-      name: "Water heater temp1"
-    temp2:
-      name: "Water heater temp2"
-    mode:
-      name: "Water heater mode"
-    thermostat:
-      name: "Water heater thermostat"
-    heat_on:
-      name: "Water heater heat"
-    hdo_low_tariff:
-      name: "Water heater HDO"
-    pin:
-      name: "Water heater PIN"
-    state:
-      name: "Water heater state"
-    version:
-      name: "Water heater version"
-    b_name:
-      name: "Water heater name"
-    consumption:
-      name: "Water heater energy"
-
-sensor:
-  - platform: wifi_signal # Reports the WiFi signal strength/RSSI in dB
-    name: "WiFi Signal dB"
-    id: water_heater_wifi_signal_db
-    update_interval: 60s
-    entity_category: "diagnostic"
-
-  - platform: copy # Reports the WiFi signal strength in %
-    source_id: water_heater_wifi_signal_db
-    name: "WiFi Signal Percent"
-    filters:
-      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
-    unit_of_measurement: "Signal %"
-    entity_category: "diagnostic"
-
-switch:
-  - platform: ble_client
-    ble_client_id: drazice_okhe
-    name: "Enable water heater monitoring"
-
 ota:
-  password: !secret ota_password
+  - platform: esphome
+    password: !secret ota_password
 
 wifi:
-  ssid: !secret wifi1_ssid
-  password: !secret wifi1_psk
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
 
+# Optional: used to keep the water heater clock in sync (used automatically when present)
+time:
+  - platform: homeassistant
+
+ble_client:
+  - mac_address: XX:XX:XX:XX:XX:XX
+
+smartboiler:
 
