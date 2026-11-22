@@ -1,5 +1,8 @@
 #include "smartboiler.h"
 #include "esphome/core/application.h"
+#if __has_include("esphome/core/alloc_helpers.h")
+#include "esphome/core/alloc_helpers.h"
+#endif
 #include <algorithm>
 #include <cinttypes>
 #include <cmath>
